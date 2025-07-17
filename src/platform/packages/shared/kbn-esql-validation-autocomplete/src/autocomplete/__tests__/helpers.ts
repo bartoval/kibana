@@ -36,7 +36,6 @@ import {
   timeseriesIndices,
   editorExtensions,
   inferenceEndpoints,
-  mockLicense,
 } from '../../__tests__/helpers';
 
 export type PartialSuggestionWithText = Partial<ISuggestionItem> & { text: string };
