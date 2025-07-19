@@ -7,6 +7,7 @@
  * License v3.0 only", or the "Server Side Public License, v 1".
  */
 import { uniqBy } from 'lodash';
+import { ESQLLicenseType } from '@kbn/esql-types';
 import {
   ESQLAstItem,
   ESQLCommand,
@@ -357,6 +358,18 @@ export function validateFunction({
       return messages;
     }
   }
+
+  // Check license requirements for the function
+  const hasMinimumLicenseRequired = context.hasMinimumLicenseRequired;
+
+  if (isFnSupported.supported && hasMinimumLicenseRequired) {
+    const licenseMessages = validateFunctionLicense(fn, hasMinimumLicenseRequired);
+    if (licenseMessages.length) {
+      messages.push(...licenseMessages);
+      return messages;
+    }
+  }
+
   const matchingSignatures = getSignaturesWithMatchingArity(fnDefinition, fn);
   if (!matchingSignatures.length) {
     const { max, min } = getMaxMinNumberOfParams(fnDefinition);
@@ -919,6 +932,52 @@ export function isSupportedFunction(
     supported: isSupported,
     reason: isSupported ? undefined : fn ? 'unsupportedFunction' : 'unknownFunction',
   };
+}
+
+function validateFunctionLicense(
+  fn: ESQLFunction,
+  hasMinimumLicenseRequired: ((minimumLicenseRequired: ESQLLicenseType) => boolean) | undefined
+): ESQLMessage[] {
+  const fnDefinition = getFunctionDefinition(fn.name);
+  if (!fnDefinition) {
+    return [];
+  }
+
+  // Check if any signature requires a license
+  const licensedSignatures = fnDefinition.signatures.filter((signature) => signature.license);
+  if (licensedSignatures.length === 0) {
+    return [];
+  }
+
+  // Check if current license meets the minimum requirement for any signature
+  let hasValidLicense = false;
+  for (const signature of licensedSignatures) {
+    if (signature.license) {
+      if (
+        hasMinimumLicenseRequired &&
+        hasMinimumLicenseRequired(signature.license.toLocaleLowerCase() as ESQLLicenseType)
+      ) {
+        hasValidLicense = true;
+        break;
+      }
+    }
+  }
+
+  if (!hasValidLicense) {
+    const requiredLicense = licensedSignatures[0].license;
+    return [
+      getMessageFromId({
+        messageId: 'licenseRequired',
+        values: {
+          name: fn.name.toUpperCase(),
+          requiredLicense: requiredLicense?.toUpperCase() || 'UNKNOWN',
+        },
+        locations: fn.location,
+      }),
+    ];
+  }
+
+  return [];
 }
 
 // #endregion

@@ -399,6 +399,13 @@ export interface ValidationErrors {
     message: string;
     type: {};
   };
+  licenseRequired: {
+    message: string;
+    type: {
+      name: string;
+      requiredLicense: string;
+    };
+  };
 }
 
 export type ErrorTypes = keyof ValidationErrors;

@@ -370,6 +370,16 @@ function getMessageAndTypeFromId<K extends ErrorTypes>({
           defaultMessage: '[FORK] a query cannot have more than one FORK command.',
         }),
       };
+    case 'licenseRequired':
+      return {
+        message: i18n.translate('kbn-esql-ast.esql.validation.licenseRequired', {
+          defaultMessage: 'Function {name} requires a {requiredLicense} license.',
+          values: {
+            name: out.name,
+            requiredLicense: out.requiredLicense,
+          },
+        }),
+      };
   }
   return { message: '' };
 }

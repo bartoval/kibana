@@ -824,4 +824,47 @@ describe('function validation', () => {
       // @TODO — test function aliases
     });
   });
+
+  describe('license validation', () => {
+    setTestFunctions([
+      {
+        name: 'categorize',
+        type: FunctionDefinitionTypes.SCALAR,
+        description: '',
+        locationsAvailable: [Location.STATS_BY],
+        signatures: [
+          {
+            params: [{ name: 'field', type: 'keyword' }],
+            returnType: 'keyword',
+            license: 'PLATINUM',
+          },
+        ],
+      },
+    ]);
+
+    it('validates platinum license for CATEGORIZE function', async () => {
+      const { expectErrors, callbacks } = await setup();
+
+      // Mock license callback for platinum license
+      callbacks.getLicense = jest.fn(async () => ({
+        hasAtLeast: (license?: string) => license?.toLowerCase() === 'platinum',
+      }));
+
+      // Test with platinum license - should not show license errors
+      await expectErrors(
+        'FROM a_index | STATS col0 = AVG(doubleField) BY CATEGORIZE(keywordField)',
+        []
+      );
+
+      callbacks.getLicense = jest.fn(async () => ({
+        hasAtLeast: (license?: string) => license?.toLowerCase() === 'basic',
+      }));
+
+      // Test with basic license - should show license error
+      await expectErrors(
+        'FROM a_index | STATS col0 = AVG(doubleField) BY CATEGORIZE(keywordField)',
+        ['Function CATEGORIZE requires a PLATINUM license.']
+      );
+    });
+  });
 });

@@ -766,6 +766,76 @@ describe('validation logic', () => {
         ]
       );
     });
+
+    describe('license validation', () => {
+      function getLicenseCallbackMocks(licenseType?: string) {
+        return {
+          ...getCallbackMocks(),
+          getLicense: jest.fn(async () => ({
+            hasAtLeast: (license?: string) => {
+              if (!licenseType || !license) return true;
+              // simplification of real logic from kibana.service.esql.hasAtLeast, based on minimum required license levels
+              return licenseType.toLowerCase() === license.toLowerCase();
+            },
+          })),
+        };
+      }
+
+      it('should not show license errors for CATEGORIZE with platinum license', async () => {
+        const callbackMocks = getLicenseCallbackMocks('platinum');
+        const { errors } = await validateQuery(
+          'FROM index | STATS col0 = AVG(bytes) BY CATEGORIZE(agent)',
+          undefined,
+          callbackMocks
+        );
+        expect(
+          errors.filter((e) => ('code' in e ? e.code : null) === 'licenseRequired')
+        ).toHaveLength(0);
+      });
+
+      it('should show license error for CATEGORIZE with basic license', async () => {
+        const callbackMocks = getLicenseCallbackMocks('basic');
+        const { errors } = await validateQuery(
+          'FROM index | STATS col0 = AVG(bytes) BY CATEGORIZE(agent)',
+          undefined,
+          callbackMocks
+        );
+        const licenseErrors = errors.filter(
+          (e) => ('code' in e ? e.code : null) === 'licenseRequired'
+        );
+        expect(licenseErrors).toHaveLength(1);
+        expect(
+          'text' in licenseErrors[0]
+            ? licenseErrors[0].text
+            : 'message' in licenseErrors[0]
+            ? licenseErrors[0].message
+            : ''
+        ).toContain('Function CATEGORIZE requires a PLATINUM license');
+      });
+
+      it('should handle multiple licensed functions in one query', async () => {
+        const callbackMocks = getLicenseCallbackMocks('basic');
+        const { errors } = await validateQuery(
+          'FROM index | STATS agg = ST_EXTENT_AGG(location), cat = CATEGORIZE(message)',
+          undefined,
+          callbackMocks
+        );
+        const licenseErrors = errors.filter(
+          (e) => ('code' in e ? e.code : null) === 'licenseRequired'
+        );
+        expect(licenseErrors).toHaveLength(2);
+        expect(
+          licenseErrors.some((e) =>
+            ('text' in e ? e.text : 'message' in e ? e.message : '').includes('CATEGORIZE')
+          )
+        ).toBe(true);
+        expect(
+          licenseErrors.some((e) =>
+            ('text' in e ? e.text : 'message' in e ? e.message : '').includes('ST_EXTENT_AGG')
+          )
+        ).toBe(true);
+      });
+    });
   });
 
   describe('Ignoring errors based on callbacks', () => {
