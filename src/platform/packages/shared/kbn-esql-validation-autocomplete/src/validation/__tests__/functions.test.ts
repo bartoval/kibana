@@ -825,46 +825,190 @@ describe('function validation', () => {
     });
   });
 
-  describe('license validation', () => {
-    setTestFunctions([
-      {
-        name: 'categorize',
-        type: FunctionDefinitionTypes.SCALAR,
-        description: '',
-        locationsAvailable: [Location.STATS_BY],
-        signatures: [
-          {
-            params: [{ name: 'field', type: 'keyword' }],
-            returnType: 'keyword',
-            license: 'PLATINUM',
-          },
-        ],
-      },
-    ]);
+  describe('License-based validation', () => {
+    beforeEach(() => {
+      setTestFunctions([
+        {
+          type: FunctionDefinitionTypes.GROUPING,
+          name: 'platinum_function_mock',
+          description: '',
+          signatures: [
+            {
+              params: [
+                {
+                  name: 'field',
+                  type: 'keyword',
+                  optional: false,
+                },
+              ],
+              license: 'PLATINUM',
+              returnType: 'keyword',
+            },
+            {
+              params: [
+                {
+                  name: 'field',
+                  type: 'text',
+                  optional: false,
+                },
+              ],
+              license: 'PLATINUM',
+              returnType: 'keyword',
+            },
+          ],
+          locationsAvailable: [Location.STATS, Location.STATS_BY],
+          license: 'PLATINUM',
+        },
+        {
+          type: FunctionDefinitionTypes.AGG,
+          name: 'platinum_partial_function_mock',
+          description: '',
+          signatures: [
+            {
+              params: [
+                {
+                  name: 'field',
+                  type: 'cartesian_point',
+                  optional: false,
+                },
+              ],
+              returnType: 'cartesian_shape',
+            },
+            {
+              params: [
+                {
+                  name: 'field',
+                  type: 'cartesian_shape',
+                  optional: false,
+                },
+              ],
+              license: 'PLATINUM',
+              returnType: 'cartesian_shape',
+            },
+          ],
+          locationsAvailable: [Location.STATS, Location.STATS_BY],
+        },
+        {
+          type: FunctionDefinitionTypes.SCALAR,
+          name: 'inner_function_mock',
+          description: '',
+          signatures: [
+            {
+              params: [
+                {
+                  name: 'field',
+                  type: 'cartesian_point',
+                  optional: false,
+                },
+              ],
+              returnType: 'cartesian_point',
+            },
+            {
+              params: [
+                {
+                  name: 'field',
+                  type: 'keyword',
+                  optional: false,
+                },
+              ],
+              returnType: 'cartesian_point',
+            },
+          ],
+          locationsAvailable: [Location.STATS, Location.STATS_BY],
+        },
+      ]);
+    });
 
-    it('validates platinum license for CATEGORIZE function', async () => {
+    it('should allow PLATINUM functions when user has PLATINUM license', async () => {
       const { expectErrors, callbacks } = await setup();
 
-      // Mock license callback for platinum license
       callbacks.getLicense = jest.fn(async () => ({
         hasAtLeast: (license?: string) => license?.toLowerCase() === 'platinum',
       }));
 
-      // Test with platinum license - should not show license errors
       await expectErrors(
-        'FROM a_index | STATS col0 = AVG(doubleField) BY CATEGORIZE(keywordField)',
+        'FROM a_index | STATS col0 = AVG(doubleField) BY PLATINUM_FUNCTION_MOCK(keywordField)',
         []
       );
+    });
+
+    it('should allow cartesian_point input for PLATINUM_PARTIAL_FUNCTION_MOCK with BASIC license', async () => {
+      const { expectErrors, callbacks } = await setup();
 
       callbacks.getLicense = jest.fn(async () => ({
         hasAtLeast: (license?: string) => license?.toLowerCase() === 'basic',
       }));
 
-      // Test with basic license - should show license error
       await expectErrors(
-        'FROM a_index | STATS col0 = AVG(doubleField) BY CATEGORIZE(keywordField)',
-        ['Function CATEGORIZE requires a PLATINUM license.']
+        'FROM index | STATS extent = PLATINUM_PARTIAL_FUNCTION_MOCK(TO_CARTESIANPOINT([0,0]))',
+        []
       );
+    });
+
+    it('should reject PLATINUM functions when user has only BASIC license', async () => {
+      const { expectErrors, callbacks } = await setup();
+
+      callbacks.getLicense = jest.fn(async () => ({
+        hasAtLeast: (license?: string) => license?.toLowerCase() === 'basic',
+      }));
+
+      await expectErrors(
+        'FROM a_index | STATS col0 = AVG(doubleField) BY PLATINUM_FUNCTION_MOCK(keywordField)',
+        ['PLATINUM_FUNCTION_MOCK requires a PLATINUM license.']
+      );
+    });
+
+    it('should reject cartesian_shape input for PLATINUM_PARTIAL_FUNCTION_MOCK with BASIC license', async () => {
+      const { expectErrors, callbacks } = await setup();
+
+      callbacks.getLicense = jest.fn(async () => ({
+        hasAtLeast: (license?: string) => license?.toLowerCase() === 'basic',
+      }));
+
+      await expectErrors(
+        'FROM index | STATS extent = PLATINUM_PARTIAL_FUNCTION_MOCK(TO_CARTESIANSHAPE([0,0]))',
+        [
+          "PLATINUM_PARTIAL_FUNCTION_MOCK with 'field' of type 'cartesian_shape' requires a PLATINUM license.",
+        ]
+      );
+    });
+
+    it('should require license for all signatures when all require platinum', async () => {
+      const { expectErrors, callbacks } = await setup();
+
+      callbacks.getLicense = jest.fn(async () => ({
+        hasAtLeast: (license?: string) => license?.toLowerCase() === 'basic',
+      }));
+
+      await expectErrors('FROM index | STATS result = PLATINUM_FUNCTION_MOCK("invalid string")', [
+        'At least one aggregation function required in [STATS], found [PLATINUM_FUNCTION_MOCK("invalid string")]',
+        'PLATINUM_FUNCTION_MOCK requires a PLATINUM license.',
+      ]);
+    });
+
+    it('should handle nested function calls with mixed license requirements', async () => {
+      const { expectErrors, callbacks } = await setup();
+
+      callbacks.getLicense = jest.fn(async () => ({
+        hasAtLeast: (license?: string) => license?.toLowerCase() === 'basic',
+      }));
+
+      await expectErrors(
+        'FROM index | STATS result =PLATINUM_PARTIAL_FUNCTION_MOCK(PLATINUM_FUNCTION_MOCK())',
+        ['PLATINUM_FUNCTION_MOCK requires a PLATINUM license.']
+      );
+    });
+
+    it('should return errors for license and type errors', async () => {
+      const { expectErrors, callbacks } = await setup();
+
+      callbacks.getLicense = jest.fn(async () => ({
+        hasAtLeast: (license?: string) => license?.toLowerCase() === 'basic',
+      }));
+
+      await expectErrors('FROM index | STATS result = PLATINUM_PARTIAL_FUNCTION_MOCK(123)', [
+        'Argument of [platinum_partial_function_mock] must be [cartesian_point], found value [123] type [integer]',
+      ]);
     });
   });
 });

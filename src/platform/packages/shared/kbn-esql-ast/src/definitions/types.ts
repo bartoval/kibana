@@ -406,6 +406,14 @@ export interface ValidationErrors {
       requiredLicense: string;
     };
   };
+  licenseRequiredForSignature: {
+    message: string;
+    type: {
+      name: string;
+      signatureDescription: string;
+      requiredLicense: string;
+    };
+  };
 }
 
 export type ErrorTypes = keyof ValidationErrors;

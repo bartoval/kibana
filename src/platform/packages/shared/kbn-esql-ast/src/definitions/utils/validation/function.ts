@@ -371,6 +371,23 @@ export function validateFunction({
   }
 
   const matchingSignatures = getSignaturesWithMatchingArity(fnDefinition, fn);
+
+  // Check signature-specific license requirements
+  if (isFnSupported.supported && hasMinimumLicenseRequired && matchingSignatures.length > 0) {
+    const signatureLicenseMessages = validateSignatureLicense(
+      fn,
+      matchingSignatures,
+      hasMinimumLicenseRequired,
+      context,
+      parentCommand
+    );
+
+    if (signatureLicenseMessages.length) {
+      messages.push(...signatureLicenseMessages);
+      return messages;
+    }
+  }
+
   if (!matchingSignatures.length) {
     const { max, min } = getMaxMinNumberOfParams(fnDefinition);
     if (max === min) {
@@ -939,45 +956,172 @@ function validateFunctionLicense(
   hasMinimumLicenseRequired: ((minimumLicenseRequired: ESQLLicenseType) => boolean) | undefined
 ): ESQLMessage[] {
   const fnDefinition = getFunctionDefinition(fn.name);
+
   if (!fnDefinition) {
     return [];
   }
 
-  // Check if any signature requires a license
-  const licensedSignatures = fnDefinition.signatures.filter((signature) => signature.license);
-  if (licensedSignatures.length === 0) {
-    return [];
-  }
+  const { license } = fnDefinition;
 
-  // Check if current license meets the minimum requirement for any signature
-  let hasValidLicense = false;
-  for (const signature of licensedSignatures) {
-    if (signature.license) {
-      if (
-        hasMinimumLicenseRequired &&
-        hasMinimumLicenseRequired(signature.license.toLocaleLowerCase() as ESQLLicenseType)
-      ) {
-        hasValidLicense = true;
-        break;
-      }
+  if (!!hasMinimumLicenseRequired && license) {
+    if (!hasMinimumLicenseRequired(license.toLocaleLowerCase() as ESQLLicenseType)) {
+      return [
+        getMessageFromId({
+          messageId: 'licenseRequired',
+          values: {
+            name: fn.name.toUpperCase(),
+            requiredLicense: license?.toUpperCase() || 'UNKNOWN',
+          },
+          locations: fn.location,
+        }),
+      ];
     }
   }
 
-  if (!hasValidLicense) {
-    const requiredLicense = licensedSignatures[0].license;
-    return [
-      getMessageFromId({
-        messageId: 'licenseRequired',
-        values: {
-          name: fn.name.toUpperCase(),
-          requiredLicense: requiredLicense?.toUpperCase() || 'UNKNOWN',
-        },
-        locations: fn.location,
-      }),
-    ];
+  return [];
+}
+
+/**
+ * Validates license requirements for function signatures based on argument types.
+ *
+ * This function handles cases where functions have multiple signatures with different
+ * license requirements. For example, ST_EXTENT_AGG has signatures that accept:
+ * - cartesian_point → cartesian_shape (no license required)
+ * - cartesian_shape → cartesian_shape (PLATINUM license required)
+ *
+ * The function performs these steps:
+ * 1. Filters signatures to only those that match the actual argument types being used
+ * 2. Checks if any matching signature is available without a license requirement
+ * 3. If all matching signatures require licenses, validates user's license level
+ * 4. Returns specific error messages indicating which signature requires the license
+ *
+ * @example
+ * // For ST_EXTENT_AGG(TO_CARTESIANPOINT(field)) with BASIC license:
+ * // Returns [] because cartesian_point signature doesn't require license
+ *
+ * // For ST_EXTENT_AGG(TO_CARTESIANSHAPE(field)) with BASIC license:
+ * // Returns ["...some error message"]
+ */
+function validateSignatureLicense(
+  fn: ESQLFunction,
+  matchingSignatures: FunctionDefinition['signatures'],
+  hasMinimumLicenseRequired: (minimumLicenseRequired: ESQLLicenseType) => boolean,
+  context: ICommandContext,
+  parentCommand: string
+): ESQLMessage[] {
+  if (matchingSignatures.length === 0) {
+    return [];
   }
 
-  return [];
+  const typeMatchingSignatures = getValidationTypeMatchingSignatures(
+    fn,
+    matchingSignatures,
+    context,
+    parentCommand
+  );
+
+  // This ensures we only validate licenses for signatures that could actually be used
+  // Note: matchingSignatures is a fallback for cases like ST_EXTENT_AGG(wrongField).
+  // example: ST_EXTENT_AGG(0) → typeMatchingSignatures = [], but hasUnlicensedSignature must be true to bypass the license check and to to the next step.
+  const relevantSignatures =
+    typeMatchingSignatures.length > 0 ? typeMatchingSignatures : matchingSignatures;
+
+  // If the user can use at least one signature without a license, the function is allowed
+  const hasUnlicensedSignature = relevantSignatures.some((sig) => !sig.license);
+  if (hasUnlicensedSignature) {
+    return [];
+  }
+
+  // If the user has the required license for at least one signature, allow the function
+  const hasValidLicense = relevantSignatures.some(
+    (signature) =>
+      signature.license &&
+      hasMinimumLicenseRequired(signature.license.toLocaleLowerCase() as ESQLLicenseType)
+  );
+
+  if (hasValidLicense) {
+    return [];
+  }
+
+  // Generate a specific error message indicating which signature requires the license
+  const firstLicensedSignature = relevantSignatures.find((sig) => sig.license);
+  const requiredLicense = firstLicensedSignature?.license?.toUpperCase() || 'UNKNOWN';
+
+  const signatureDescription = generateSignatureDescription(firstLicensedSignature);
+
+  return [
+    getMessageFromId({
+      messageId: 'licenseRequiredForSignature',
+      values: {
+        name: fn.name.toUpperCase(),
+        signatureDescription,
+        requiredLicense,
+      },
+      locations: fn.location,
+    }),
+  ];
+}
+
+/**
+ * Helper function to filter signatures that match argument types for validation.
+ * Similar to getValidFunctionSignaturesForPreviousArgs but for complete validation
+ * with full context and array handling.
+ */
+function getValidationTypeMatchingSignatures(
+  fn: ESQLFunction,
+  signatures: FunctionDefinition['signatures'],
+  context: ICommandContext,
+  parentCommand: string
+): FunctionDefinition['signatures'] {
+  return signatures.filter((signature) =>
+    signature.params.every((param, index) => {
+      const arg = fn.args[index];
+
+      if (!arg) {
+        return param.optional;
+      }
+
+      if (Array.isArray(arg)) {
+        if (arg.length === 0) {
+          return param.optional;
+        }
+
+        const firstArg = arg[0];
+        if (Array.isArray(firstArg)) {
+          return false; // Nested arrays. Do we have this case?
+        }
+
+        return checkFunctionArgMatchesDefinition(firstArg, param, context, parentCommand);
+      }
+
+      return checkFunctionArgMatchesDefinition(arg, param, context, parentCommand);
+    })
+  );
+}
+
+/**
+ * Generates a description of a function signature.
+ * Examples:
+ * - "'field' of type 'geo_shape'"
+ * - "'field' of type 'cartesian_shape', 'precision' of type 'integer'"
+ */
+function generateSignatureDescription(
+  signature: FunctionDefinition['signatures'][0] | undefined
+): string {
+  if (!signature || signature.params.length === 0) {
+    return 'this signature';
+  }
+
+  if (signature.params.length === 1) {
+    const param = signature.params[0];
+    return `'${param.name}' of type '${param.type}'`;
+  }
+
+  const paramDescriptions = signature.params.map(
+    (param) => `'${param.name}' of type '${param.type}'`
+  );
+
+  return `${paramDescriptions.join(', ')}`;
 }
 
 // #endregion
