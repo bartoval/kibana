@@ -844,6 +844,13 @@ const ESQLEditorInternal = function ESQLEditor({
     [esqlCallbacks, telemetryCallbacks]
   );
 
+  const signatureProvider = useMemo(() => {
+    return ESQLLang.getSignatureProvider?.({
+      ...esqlCallbacks,
+      telemetry: telemetryCallbacks,
+    });
+  }, [esqlCallbacks, telemetryCallbacks]);
+
   const onErrorClick = useCallback(({ startLineNumber, startColumn }: MonacoMessage) => {
     if (!editor1.current) {
       return;
@@ -882,15 +889,26 @@ const ESQLEditorInternal = function ESQLEditor({
 
   onLayoutChangeRef.current = onLayoutChange;
 
+  // Container for Monaco overflow widgets (signature help, autocomplete)
+  // Rendered in body to avoid z-index stacking context issues with header
+  const [overflowWidgetsDomNode, setOverflowWidgetsDomNode] = useState<HTMLDivElement | undefined>(
+    undefined
+  );
+
   const codeEditorOptions: CodeEditorProps['options'] = useMemo(
     () => ({
       hover: {
         above: false,
       },
+      parameterHints: {
+        enabled: true,
+        cycle: true,
+      },
       accessibilitySupport: 'auto',
       autoIndent: 'keep',
       automaticLayout: true,
       fixedOverflowWidgets: true,
+      overflowWidgetsDomNode,
       folding: false,
       fontSize: 14,
       hideCursorInOverviewRuler: true,
@@ -925,11 +943,29 @@ const ESQLEditorInternal = function ESQLEditor({
       wordWrap: 'on',
       wrappingIndent: 'none',
     }),
-    [isDisabled]
+    [isDisabled, overflowWidgetsDomNode]
   );
 
   const htmlId = useGeneratedHtmlId({ prefix: 'esql-editor' });
   const [labelInFocus, setLabelInFocus] = useState(false);
+
+  // Create container for overflow widgets (appended to body, z-index above header)
+  useEffect(() => {
+    const container = document.createElement('div');
+
+    container.id = 'esql-editor-overflow-widgets';
+    container.style.zIndex = '2000';
+    container.style.position = 'fixed';
+    container.classList.add('monaco-editor');
+
+    document.body.appendChild(container);
+    setOverflowWidgetsDomNode(container);
+
+    return () => {
+      document.body.removeChild(container);
+    };
+  }, []);
+
   const editorPanel = (
     <>
       <Global styles={lookupIndexBadgeStyle} />
@@ -1029,6 +1065,7 @@ const ESQLEditorInternal = function ESQLEditor({
                       return hoverProvider?.provideHover(model, position, token);
                     },
                   }}
+                  signatureProvider={signatureProvider}
                   onChange={onQueryUpdate}
                   onFocus={() => setLabelInFocus(true)}
                   onBlur={() => setLabelInFocus(false)}
