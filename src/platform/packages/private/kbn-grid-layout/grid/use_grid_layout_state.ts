@@ -20,7 +20,7 @@ import {
   map,
   merge,
 } from 'rxjs';
-import useResizeObserver, { type ObservedSize } from 'use-resize-observer/polyfilled';
+import useResizeObserver, { type ObservedSize } from 'use-resize-observer';
 
 import { useEuiTheme } from '@elastic/eui';
 import { getScrollContainer } from '@kbn/core-chrome-layout-utils';
