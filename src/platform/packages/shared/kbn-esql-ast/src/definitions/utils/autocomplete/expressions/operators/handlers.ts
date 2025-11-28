@@ -18,8 +18,8 @@ import { getBinaryExpressionOperand, getExpressionType } from '../../../expressi
 import type { ExpressionContext } from '../types';
 import { getLogicalContinuationSuggestions, shouldSuggestOpenListForOperand } from './utils';
 import { shouldSuggestComma } from '../comma_decision_engine';
-import { buildConstantsDefinitions } from '../../../literals';
 import { SuggestionBuilder } from '../suggestion_builder';
+import { buildConstantsDefinitions } from '../../../literals';
 
 // ============================================================================
 // eg. IN / NOT IN Operators
@@ -152,33 +152,10 @@ export async function handleStringListOperator(
 
   const operator = fn.name.toLowerCase();
   const rightOperand = getBinaryExpressionOperand(fn, 'right');
-  const leftOperand = getBinaryExpressionOperand(fn, 'left');
 
-  // No list yet: suggest any string expressions (LIKE pattern can be any string expression)
+  // suggest string literal patterns only
   if (shouldSuggestOpenListForOperand(rightOperand)) {
-    // LIKE/RLIKE accepts any string pattern, so suggest all string-compatible expressions
-    const builder = new SuggestionBuilder(context);
-
-    const ignoredColumns = isColumn(leftOperand)
-      ? [leftOperand.parts.join('.')].filter(Boolean)
-      : [];
-
-    await builder.addFields({
-      types: ['any'],
-      ignoredColumns,
-    });
-
-    builder
-      .addFunctions({
-        types: ['any'],
-      })
-      .addLiterals({
-        types: ['any'],
-        includeDateLiterals: false,
-        includeCompatibleLiterals: true,
-      });
-
-    return builder.build();
+    return getStringPatternSuggestions(operator);
   }
 
   // Only handle list form; otherwise, delegate by returning null
@@ -213,9 +190,9 @@ export async function handleStringListOperator(
 function getStringPatternSuggestions(operator: string): ISuggestionItem[] {
   const isRlike = operator.includes('rlike');
 
-  // RLIKE: empty string, match anything, match from start to end
-  // LIKE: empty string, wildcard for any characters
-  const patterns = isRlike ? ['""', '".*"', '"^.*$"'] : ['""', '"*"'];
+  // RLIKE: regex pattern for matching anything
+  // LIKE: wildcard pattern for matching anything
+  const patterns = isRlike ? ['".*"'] : ['"*"'];
 
   return buildConstantsDefinitions(patterns, undefined, 'A');
 }

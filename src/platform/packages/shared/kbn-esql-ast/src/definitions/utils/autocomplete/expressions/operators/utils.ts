@@ -33,7 +33,7 @@ export function endsWithInOrNotInToken(innerText: string): boolean {
 }
 
 export function endsWithLikeOrRlikeToken(innerText: string): boolean {
-  return /\b(?:not\s+)?r?like\s+$/i.test(innerText);
+  return /\b(?:not\s+)?r?like\s*\(?\s*$/i.test(innerText);
 }
 
 export function endsWithIsOrIsNotToken(innerText: string): boolean {

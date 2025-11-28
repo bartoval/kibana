@@ -510,4 +510,168 @@ describe('regular expressions', () => {
       });
     });
   });
+
+  describe('parameters', () => {
+    it('LIKE with named parameter', () => {
+      const text = 'ROW name LIKE ?pattern';
+      const { root, errors } = Parser.parse(text);
+      const expression = root.commands[0].args[0];
+
+      expect(errors.length).toBe(0);
+      expect(expression).toMatchObject({
+        type: 'function',
+        name: 'like',
+        args: [
+          {
+            type: 'column',
+            name: 'name',
+          },
+          {
+            type: 'literal',
+            literalType: 'param',
+            paramType: 'named',
+            value: 'pattern',
+          },
+        ],
+      });
+    });
+
+    it('RLIKE with named parameter', () => {
+      const text = 'ROW name RLIKE ?regex';
+      const { root, errors } = Parser.parse(text);
+      const expression = root.commands[0].args[0];
+
+      expect(errors.length).toBe(0);
+      expect(expression).toMatchObject({
+        type: 'function',
+        name: 'rlike',
+        args: [
+          {
+            type: 'column',
+            name: 'name',
+          },
+          {
+            type: 'literal',
+            literalType: 'param',
+            paramType: 'named',
+            value: 'regex',
+          },
+        ],
+      });
+    });
+
+    it('NOT LIKE with positional parameter', () => {
+      const text = 'ROW name NOT LIKE ?1';
+      const { root, errors } = Parser.parse(text);
+      const expression = root.commands[0].args[0];
+
+      expect(errors.length).toBe(0);
+      expect(expression).toMatchObject({
+        type: 'function',
+        name: 'not like',
+        args: [
+          {
+            type: 'column',
+            name: 'name',
+          },
+          {
+            type: 'literal',
+            literalType: 'param',
+            paramType: 'positional',
+            value: 1,
+          },
+        ],
+      });
+    });
+
+    it('LIKE list with mixed strings and parameters', () => {
+      const text = 'ROW name LIKE ("test*", ?pattern, "other*")';
+      const { root, errors } = Parser.parse(text);
+      const expression = root.commands[0].args[0];
+
+      expect(errors.length).toBe(0);
+      expect(expression).toMatchObject({
+        type: 'function',
+        name: 'like',
+        args: [
+          {
+            type: 'column',
+            name: 'name',
+          },
+          {
+            type: 'list',
+            subtype: 'tuple',
+            values: [
+              {
+                type: 'literal',
+                literalType: 'keyword',
+                valueUnquoted: 'test*',
+              },
+              {
+                type: 'literal',
+                literalType: 'param',
+                paramType: 'named',
+                value: 'pattern',
+              },
+              {
+                type: 'literal',
+                literalType: 'keyword',
+                valueUnquoted: 'other*',
+              },
+            ],
+          },
+        ],
+      });
+    });
+
+    it('RLIKE list with all parameters', () => {
+      const text = 'ROW name RLIKE (?1, ?2, ?regex)';
+      const { root, errors } = Parser.parse(text);
+      const expression = root.commands[0].args[0];
+
+      expect(errors.length).toBe(0);
+      expect((expression as any).args[1].values).toHaveLength(3);
+      expect((expression as any).args[1].values[0]).toMatchObject({
+        type: 'literal',
+        literalType: 'param',
+        paramType: 'positional',
+        value: 1,
+      });
+      expect((expression as any).args[1].values[1]).toMatchObject({
+        type: 'literal',
+        literalType: 'param',
+        paramType: 'positional',
+        value: 2,
+      });
+      expect((expression as any).args[1].values[2]).toMatchObject({
+        type: 'literal',
+        literalType: 'param',
+        paramType: 'named',
+        value: 'regex',
+      });
+    });
+
+    it('LIKE with unnamed parameter', () => {
+      const text = 'ROW name LIKE ?';
+      const { root, errors } = Parser.parse(text);
+      const expression = root.commands[0].args[0];
+
+      expect(errors.length).toBe(0);
+      expect(expression).toMatchObject({
+        type: 'function',
+        name: 'like',
+        args: [
+          {
+            type: 'column',
+            name: 'name',
+          },
+          {
+            type: 'literal',
+            literalType: 'param',
+            paramType: 'unnamed',
+          },
+        ],
+      });
+    });
+  });
 });

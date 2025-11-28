@@ -2143,7 +2143,7 @@ export class CstToAstConverter {
       return undefined;
     }
 
-    const right = this.toStringLiteral(ctx.string_());
+    const right = this.toStringOrParamLiteral(ctx.stringOrParameter());
     const notCtx = ctx.NOT();
     const likeType = ctx instanceof cst.RlikeExpressionContext ? 'rlike' : 'like';
     const operator = `${notCtx ? 'not ' : ''}${likeType}` as ast.BinaryExpressionOperator;
@@ -2157,7 +2157,7 @@ export class CstToAstConverter {
       operatorNode.text = `not${operatorNode.text}`;
     }
 
-    const args: [ast.ESQLAstExpression, ast.ESQLStringLiteral] = [
+    const args: [ast.ESQLAstExpression, ast.ESQLStringLiteral | ast.ESQLParam] = [
       left as ast.ESQLAstExpression,
       right,
     ];
@@ -2189,11 +2189,10 @@ export class CstToAstConverter {
       operatorNode.text = `not${operatorNode.text}`;
     }
 
-    // Convert the list of string patterns into a tuple list AST node
-    const stringCtxs = ctx.string__list();
-    const values: ast.ESQLStringLiteral[] = stringCtxs.map((stringCtx) =>
-      this.toStringLiteral(stringCtx)
-    );
+    // Convert the list of string/parameter patterns into a tuple list AST node
+    const values = ctx
+      .stringOrParameter_list()
+      .map((itemCtx) => this.toStringOrParamLiteral(itemCtx));
 
     const list = Builder.expression.list.tuple(
       { values },
@@ -2918,6 +2917,12 @@ export class CstToAstConverter {
       },
       this.getParserFields(ctx)
     );
+  }
+
+  private toStringOrParamLiteral(
+    ctx: cst.StringOrParameterContext
+  ): ast.ESQLStringLiteral | ast.ESQLParam {
+    return ctx.string_() ? this.toStringLiteral(ctx.string_()) : this.toParam(ctx.parameter())!;
   }
 
   private fromInputParameter(ctx: cst.InputParameterContext): ast.ESQLLiteral[] {
