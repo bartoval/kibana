@@ -14,10 +14,10 @@ import type {
   ESQLSingleAstItem,
 } from '../../../../../../types';
 import type { PartialOperatorDetection } from '../../types';
-import { endsWithInOrNotInToken, endsWithIsOrIsNotToken } from '../utils';
+import { endsWithInOrNotInToken, endsWithIsOrIsNotToken, endsWithLikeOrRlikeToken } from '../utils';
 import { Builder } from '../../../../../../builder';
 
-const LIKE_OPERATOR_REGEX = /\b((?:not\s+)?r?like)\s*$/i;
+const NOT_LIKE_REGEX = /\bnot\s+like\s*$/i;
 const NOT_IN_REGEX = /\bnot\s+in\s*$/i;
 const IS_NOT_REGEX = /\bis\s+not\b/i;
 
@@ -126,18 +126,18 @@ export function detectNullCheck(innerText: string): PartialOperatorDetection | n
 }
 
 /**
- * Detects partial LIKE / RLIKE / NOT LIKE / NOT RLIKE operators.
- * Examples: "field LIKE ", "field RLIKE ", "field NOT LIKE ", "field NOT RLIKE "
+ * Detects partial LIKE / NOT LIKE operators.
+ * Examples: "field LIKE ", "field NOT LIKE "
  */
 export function detectLike(innerText: string): PartialOperatorDetection | null {
-  const match = LIKE_OPERATOR_REGEX.exec(innerText);
-
-  if (!match) {
+  if (!endsWithLikeOrRlikeToken(innerText)) {
     return null;
   }
 
+  const isNotLike = NOT_LIKE_REGEX.test(innerText);
+
   return {
-    operatorName: match[1].toLowerCase().replace(/\s+/g, ' '),
+    operatorName: isNotLike ? 'not like' : 'like',
     textBeforeCursor: innerText,
   };
 }
