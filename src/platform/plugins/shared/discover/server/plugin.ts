@@ -31,6 +31,7 @@ import { getUiSettings } from './ui_settings';
 import { registerAttachments } from './agent_builder/register_attachments';
 import { registerSkill } from './agent_builder/register_skill';
 import { createGuardedEsqlTool } from './selection_investigation/guarded_esql';
+import { registerInvestigationHooks } from './selection_investigation/policy';
 import { registerSelectionInvestigationRoute } from './selection_investigation/route';
 import type { ConfigSchema } from './config';
 import { appLocatorGetLocationCommon } from '../common/app_locator_get_location';
@@ -107,6 +108,7 @@ export class DiscoverServerPlugin
       registerAttachments(plugins.agentBuilder);
       registerSkill(plugins.agentBuilder);
       plugins.agentBuilder.tools.register(createGuardedEsqlTool());
+      registerInvestigationHooks(plugins.agentBuilder);
     }
 
     core.pricing.registerProductFeatures([

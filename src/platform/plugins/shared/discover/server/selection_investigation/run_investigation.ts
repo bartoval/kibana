@@ -7,7 +7,7 @@
  * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
-import type { IScopedClusterClient, KibanaRequest, Logger } from '@kbn/core/server';
+import type { KibanaRequest, Logger } from '@kbn/core/server';
 import type { Subject } from 'rxjs';
 import type { ServerSentEvent } from '@kbn/sse-utils';
 import {
@@ -15,15 +15,19 @@ import {
   agentBuilderDefaultAgentId,
   isMessageCompleteEvent,
   isPromptRequestEvent,
+  isReasoningEvent,
   isToolCallEvent,
+  isToolResultEvent,
 } from '@kbn/agent-builder-common';
 import type { AgentBuilderPluginStart } from '@kbn/agent-builder-server';
-import type { InvestigationModelOutput } from '../../common/selection_investigation';
+import type {
+  InvestigationModelOutput,
+  InvestigationRuntimeTimings,
+} from '../../common/selection_investigation';
 import { INVESTIGATION_PLAYBOOK, buildAgentInput } from './agent_input';
 import { DISCOVER_INVESTIGATION_ESQL_TOOL_ID } from './constants';
 import type { EvidenceLedger } from './evidence';
-import { finalizeInvestigation, getComparisonCoverageIssue } from './finalize';
-import { executeGuardedInvestigationQuery } from './guarded_esql';
+import { finalizeInvestigation } from './finalize';
 import { INVESTIGATION_OUTPUT_SCHEMA, investigationModelOutputSchema } from './model_output';
 import type { InvestigationExecutionPolicy } from './policy';
 import { safeErrorEvent, toSseEvent } from './sse_events';
@@ -35,7 +39,6 @@ import { safeErrorEvent, toSseEvent } from './sse_events';
 export const runInvestigation = async ({
   policy,
   ledger,
-  esClient,
   request,
   agentBuilder,
   executionId,
@@ -46,7 +49,6 @@ export const runInvestigation = async ({
 }: {
   policy: InvestigationExecutionPolicy;
   ledger: EvidenceLedger;
-  esClient: IScopedClusterClient;
   request: KibanaRequest;
   agentBuilder: AgentBuilderPluginStart;
   executionId: string;
@@ -56,30 +58,10 @@ export const runInvestigation = async ({
   onSettled: () => void;
 }): Promise<void> => {
   try {
-    await executeGuardedInvestigationQuery({
-      policy,
-      esClient,
-      purpose: 'total',
-    });
-    const coverageIssue = getComparisonCoverageIssue(ledger);
-    if (coverageIssue) {
-      output$.next(
-        toSseEvent({
-          type: 'completed',
-          data: {
-            outcome: 'insufficient_evidence',
-            findings: [],
-            insufficientEvidenceReason: coverageIssue,
-          },
-        })
-      );
-      output$.complete();
-      onSettled();
-      return;
-    }
     const planningStep = { stepId: 'planning', phase: 'planning' as const };
     policy.onPhase(planningStep, 'start');
     let execution;
+    const agentExecutionStartedAt = Date.now();
     try {
       execution = await agentBuilder.execution.executeAgent({
         request,
@@ -116,6 +98,77 @@ export const runInvestigation = async ({
     }
 
     let modelOutput: InvestigationModelOutput | undefined;
+    let agentExecutionCompletedAt: number | undefined;
+    let planningAndSetupMs: number | undefined;
+    let verificationDecisionMs: number | undefined;
+    let explorationCompletedAt: number | undefined;
+    let verificationCompletedAt: number | undefined;
+    const decisionGroups = new Set<string>();
+    const toolCallWaves = new Map<string, 'exploration' | 'verification'>();
+    const pendingToolCalls = {
+      exploration: new Set<string>(),
+      verification: new Set<string>(),
+    };
+    const completedWaves = new Set<'exploration' | 'verification'>();
+
+    const recordToolCall = (event: {
+      data: {
+        tool_call_id: string;
+        tool_call_group_id?: string;
+        params: Record<string, unknown>;
+      };
+    }) => {
+      const wave =
+        event.data.params.wave === 'exploration' || event.data.params.wave === 'verification'
+          ? event.data.params.wave
+          : undefined;
+      if (!wave) {
+        return;
+      }
+
+      const now = Date.now();
+      decisionGroups.add(event.data.tool_call_group_id ?? wave);
+      toolCallWaves.set(event.data.tool_call_id, wave);
+      pendingToolCalls[wave].add(event.data.tool_call_id);
+      if (wave === 'exploration' && planningAndSetupMs === undefined) {
+        planningAndSetupMs = now - agentExecutionStartedAt;
+      }
+      if (wave === 'verification' && verificationDecisionMs === undefined) {
+        verificationDecisionMs = now - (explorationCompletedAt ?? agentExecutionStartedAt);
+      }
+    };
+
+    const recordToolResult = (toolCallId: string) => {
+      const wave = toolCallWaves.get(toolCallId);
+      if (!wave) {
+        return;
+      }
+      pendingToolCalls[wave].delete(toolCallId);
+      if (pendingToolCalls[wave].size > 0 || completedWaves.has(wave)) {
+        return;
+      }
+      completedWaves.add(wave);
+      if (wave === 'exploration') {
+        explorationCompletedAt = Date.now();
+      } else {
+        verificationCompletedAt = Date.now();
+      }
+    };
+
+    const getRuntimeTimings = (): InvestigationRuntimeTimings => {
+      const completedAt = agentExecutionCompletedAt ?? Date.now();
+      const finalProbeCompletedAt = verificationCompletedAt ?? explorationCompletedAt;
+      return {
+        ...(planningAndSetupMs !== undefined ? { planningAndSetupMs } : {}),
+        ...(verificationDecisionMs !== undefined ? { verificationDecisionMs } : {}),
+        ...(finalProbeCompletedAt !== undefined
+          ? { handoffAndSynthesisMs: completedAt - finalProbeCompletedAt }
+          : {}),
+        totalAgentMs: completedAt - agentExecutionStartedAt,
+        investigativeDecisionCount: decisionGroups.size,
+      };
+    };
+
     let planningFinished = false;
     const finishPlanning = (status: 'success' | 'failure') => {
       if (!planningFinished) {
@@ -123,25 +176,82 @@ export const runInvestigation = async ({
         policy.onPhase(planningStep, status);
       }
     };
+    const synthesisStep = { stepId: 'synthesis', phase: 'synthesis' as const };
+    let synthesisStarted = false;
+    let synthesisFinished = false;
+    const startSynthesis = () => {
+      if (!synthesisStarted) {
+        synthesisStarted = true;
+        policy.onPhase(synthesisStep, 'start');
+      }
+    };
+    const finishSynthesis = (status: 'success' | 'failure') => {
+      if (synthesisStarted && !synthesisFinished) {
+        synthesisFinished = true;
+        policy.onPhase(synthesisStep, status);
+      }
+    };
+    let streamSettled = false;
+    const settleStream = (writeTerminalEvent: () => void) => {
+      if (streamSettled) {
+        return;
+      }
+      streamSettled = true;
+      try {
+        if (!output$.closed) {
+          writeTerminalEvent();
+        }
+      } catch (error) {
+        const normalizedError = error instanceof Error ? error : new Error(String(error));
+        logger.error(normalizedError);
+        if (!output$.closed) {
+          output$.next(toSseEvent(safeErrorEvent(normalizedError)));
+        }
+      } finally {
+        if (!output$.closed) {
+          output$.complete();
+        }
+        onSettled();
+      }
+    };
+
     execution.events$.subscribe({
       next: (event) => {
         if (isToolCallEvent(event) || isMessageCompleteEvent(event)) {
           finishPlanning('success');
         }
+        if (isToolCallEvent(event)) {
+          recordToolCall(event);
+        }
+        if (isToolResultEvent(event)) {
+          recordToolResult(event.data.tool_call_id);
+        }
+        // Agent Builder emits a transient reasoning event when its answer agent starts. Waiting
+        // until a probe has completed distinguishes it from the research agent's initial event.
+        if (
+          isReasoningEvent(event) &&
+          event.data.transient &&
+          (explorationCompletedAt !== undefined || verificationCompletedAt !== undefined)
+        ) {
+          startSynthesis();
+        }
         if (isPromptRequestEvent(event)) {
           executionAbortController.abort('protocol');
-          if (!output$.closed) {
+          finishSynthesis('failure');
+          settleStream(() => {
             output$.next(
               toSseEvent({
                 type: 'aborted',
                 data: { reason: 'protocol' },
               })
             );
-            output$.complete();
-          }
+          });
           return;
         }
         if (isMessageCompleteEvent(event) && event.data.structured_output) {
+          startSynthesis();
+          finishSynthesis('success');
+          agentExecutionCompletedAt = Date.now();
           const parsed = investigationModelOutputSchema.safeParse(event.data.structured_output);
           if (parsed.success) {
             modelOutput = parsed.data;
@@ -150,8 +260,9 @@ export const runInvestigation = async ({
       },
       error: (error: Error) => {
         finishPlanning('failure');
-        logger.error(error);
-        if (!output$.closed) {
+        finishSynthesis('failure');
+        settleStream(() => {
+          logger.error(error);
           if (executionAbortController.signal.aborted) {
             output$.next(
               toSseEvent({
@@ -169,12 +280,10 @@ export const runInvestigation = async ({
           } else {
             output$.next(toSseEvent(safeErrorEvent(error)));
           }
-          output$.complete();
-        }
-        onSettled();
+        });
       },
       complete: () => {
-        if (!output$.closed) {
+        settleStream(() => {
           if (!modelOutput) {
             output$.next(
               toSseEvent({
@@ -183,20 +292,21 @@ export const runInvestigation = async ({
               })
             );
           } else {
+            const result = finalizeInvestigation({
+              ledger,
+              modelOutput,
+            });
             output$.next(
               toSseEvent({
                 type: 'completed',
-                data: finalizeInvestigation({
-                  ledger,
-                  modelOutput,
-                  baseScopes: policy.context.scopes ?? [],
-                }),
+                data: {
+                  ...result,
+                  timings: getRuntimeTimings(),
+                },
               })
             );
           }
-          output$.complete();
-        }
-        onSettled();
+        });
       },
     });
   } catch (error) {

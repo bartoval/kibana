@@ -11,32 +11,6 @@ export const PLUGIN_ID = 'discover';
 export const APP_ICON = 'discoverApp';
 
 export { APP_STATE_URL_KEY, EMBEDDABLE_TRANSFORMS_FEATURE_FLAG_KEY } from './constants';
-export type {
-  InvestigationPhase,
-  InvestigationPhaseStatus,
-  InvestigationFindingStrength,
-  InvestigationDirection,
-  InvestigationDocumentsTimeScope,
-  InvestigationTriagePriority,
-  InvestigationTriageSignal,
-  InvestigationModelTriageSignal,
-  InvestigationTriageAction,
-  InvestigationFindingTriage,
-  InvestigationTriage,
-  SelectionInvestigationRequest,
-  InvestigationTimeRange,
-  InvestigationEvidenceReference,
-  InvestigationModelOutput,
-  InvestigationPreviewRow,
-  InvestigationFinding,
-  InvestigationScope,
-  SelectionInvestigationResult,
-  SelectionInvestigationSseEvent,
-} from './selection_investigation';
-export {
-  SELECTION_INVESTIGATION_ROUTE,
-  SELECTION_INVESTIGATION_MAX_SCOPE_DEPTH,
-} from './selection_investigation';
 export { DISCOVER_APP_LOCATOR } from './app_locator';
 export type {
   DiscoverAppLocator,

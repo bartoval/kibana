@@ -8,45 +8,77 @@
  */
 
 import { z } from '@kbn/zod/v4';
-import type { InvestigationModelTriageSignal } from '../../common/selection_investigation';
-import { INVESTIGATION_MAX_FINDINGS } from './constants';
-
-const MODEL_TRIAGE_SIGNALS = [
-  'new_activity',
-  'disappeared_activity',
-  'large_shift',
-  'concentrated_shift',
-  'scoped_change',
-  'message_pattern',
-  'multiple_evidence',
-] as const satisfies readonly InvestigationModelTriageSignal[];
+import { SELECTION_INVESTIGATION_MAX_GOAL_LENGTH } from '../../common/selection_investigation';
+import { INVESTIGATION_MAX_FINDINGS, INVESTIGATION_MAX_FOLLOW_UPS } from './constants';
 
 const evidenceReferenceSchema = z
   .object({
-    evidenceId: z.string().max(100),
-    evidenceRowId: z.string().max(100),
+    evidenceId: z.string().trim().min(1).max(100),
+    evidenceRowId: z.string().trim().min(1).max(100),
   })
   .strict();
 
 export const investigationModelOutputSchema = z
   .object({
-    candidates: z
-      .array(
-        z
-          .object({
-            primary: evidenceReferenceSchema,
-            patternTokens: z.array(z.string().min(1).max(32)).max(4),
-            triage: z
+    answer: z
+      .object({
+        status: z.enum([
+          'supported',
+          'partially_supported',
+          'no_signal_found',
+          'inconclusive',
+          'insufficient_observability',
+        ]),
+        title: z.string().trim().min(1).max(120),
+        summary: z
+          .string()
+          .trim()
+          .min(1)
+          .max(800)
+          .describe(
+            'Synthesize how the selected findings relate to the mission. Add interpretation rather than listing the visible values.'
+          ),
+        nextStep: z.string().trim().min(1).max(300),
+        followUps: z
+          .array(
+            z
               .object({
-                priority: z.enum(['investigate_now', 'monitor', 'informational']),
-                signals: z.array(z.enum(MODEL_TRIAGE_SIGNALS)).min(1).max(3),
-                nextAction: z.enum(['show_documents', 'open_query']),
+                goal: z.string().trim().min(1).max(SELECTION_INVESTIGATION_MAX_GOAL_LENGTH),
+                reason: z.string().trim().min(1).max(300),
+                evidence: z.array(evidenceReferenceSchema).min(1).max(INVESTIGATION_MAX_FINDINGS),
               })
-              .strict(),
-          })
-          .strict()
-      )
-      .max(INVESTIGATION_MAX_FINDINGS),
+              .strict()
+          )
+          .max(INVESTIGATION_MAX_FOLLOW_UPS),
+        candidates: z
+          .array(
+            z
+              .object({
+                primary: evidenceReferenceSchema,
+                kind: z.enum(['metric', 'dimension', 'pattern']),
+                title: z.string().trim().min(1).max(100),
+                interpretation: z
+                  .string()
+                  .trim()
+                  .min(1)
+                  .max(350)
+                  .describe(
+                    'Explain what this result reveals about the mission beyond its visible counts, including its relationship to other completed checks when useful.'
+                  ),
+                openQuestion: z
+                  .string()
+                  .trim()
+                  .min(1)
+                  .max(250)
+                  .describe(
+                    'State the specific important question that the completed checks did not resolve. Do not give generic advice.'
+                  ),
+              })
+              .strict()
+          )
+          .max(INVESTIGATION_MAX_FINDINGS),
+      })
+      .strict(),
   })
   .strict();
 

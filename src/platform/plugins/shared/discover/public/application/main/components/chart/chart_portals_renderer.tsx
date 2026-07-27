@@ -161,7 +161,7 @@ const ChartToggleActions = ({
   }
 
   const label = i18n.translate('discover.investigateSelection.show', {
-    defaultMessage: 'Show changes',
+    defaultMessage: 'Show investigation',
   });
 
   return (

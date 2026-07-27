@@ -7,307 +7,346 @@
  * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
-import { z } from '@kbn/zod/v4';
-import type { EsqlESQLParams, FieldValue } from '@elastic/elasticsearch/lib/api/types';
+import type { FieldValue } from '@elastic/elasticsearch/lib/api/types';
+import { Parser } from '@elastic/esql';
 import type { IScopedClusterClient } from '@kbn/core-elasticsearch-server';
-import { buildEsQuery } from '@kbn/es-query';
-import { getNamedParams } from '@kbn/esql-utils';
 import { ToolType, type ToolResult } from '@kbn/agent-builder-common';
-import type { BuiltinToolDefinition, RunContext } from '@kbn/agent-builder-server';
-import { createOtherResult, getAgentFromRunContext } from '@kbn/agent-builder-server';
-import type { InvestigationPhase, InvestigationScope } from '../../common/selection_investigation';
-import type {
-  ChangeMass,
-  EvidenceInputRow,
-  EvidenceLedger,
-  EvidencePurpose,
-  EvidenceValue,
-} from './evidence';
-import { createEvidenceRecord } from './evidence';
+import type { BuiltinToolDefinition } from '@kbn/agent-builder-server';
+import { createOtherResult } from '@kbn/agent-builder-server';
+import { z } from '@kbn/zod/v4';
+import type { InvestigationProgressStep } from '../../common/selection_investigation';
+import { DISCOVER_INVESTIGATION_ESQL_TOOL_ID } from './constants';
+import { createEvidenceRecord, isComparableEvidenceRow, type EvidenceValue } from './evidence';
 import { InvestigationError } from './errors';
+import { executeInvestigationEsql } from './esql_executor';
 import {
-  DISCOVER_INVESTIGATION_ESQL_TOOL_ID,
-  INVESTIGATION_MAX_CONTEXT_STRING_CHARS,
-  INVESTIGATION_MAX_RESPONSE_BYTES,
-  INVESTIGATION_QUERY_TIMEOUT_MS,
-} from './constants';
-import { getInvestigationPolicy, type InvestigationExecutionPolicy } from './policy';
-import { composeInvestigationQuery, freezeDiscoverQuery } from './query';
+  getInvestigationPolicy,
+  type InvestigationExecutionPolicy,
+  type InvestigationProbeWave,
+} from './policy';
 
-const evidenceReferenceSchema = z.object({
-  evidenceId: z.string().min(1).max(100),
-  evidenceRowId: z.string().min(1).max(100),
-});
-
-const toolSchema = z.object({
-  purpose: z.enum(['contributors', 'patterns']),
-  field: z.string().min(1).max(INVESTIGATION_MAX_CONTEXT_STRING_CHARS),
-  scope: evidenceReferenceSchema.optional(),
-});
+const toolSchema = z
+  .object({
+    wave: z.enum(['exploration', 'verification']),
+    pipeline: z
+      .string()
+      .trim()
+      .optional()
+      .describe(
+        'Optional ES|QL pipeline to append to the frozen Discover query. Use ES|QL aliases such as `STATS event_count = COUNT(*) BY host.keyword`, never SQL `AS`. Omit it to compare the current query output directly.'
+      ),
+    keyColumn: z
+      .string()
+      .trim()
+      .min(1)
+      .max(200)
+      .optional()
+      .describe(
+        'Column that uniquely identifies comparable rows. Omit only when the query returns one scalar row.'
+      ),
+    metricColumn: z
+      .string()
+      .trim()
+      .min(1)
+      .max(200)
+      .describe('Numeric column whose values should be compared between the two periods.'),
+    label: z
+      .string()
+      .trim()
+      .min(1)
+      .max(100)
+      .describe('Short user-facing description of what this query checks.'),
+    rationale: z
+      .string()
+      .trim()
+      .min(1)
+      .max(300)
+      .describe('One sentence explaining why this query advances the investigation mission.'),
+  })
+  .strict();
 
 type GuardedToolInput = z.infer<typeof toolSchema>;
 
-const getExecutionId = (runContext: RunContext): string | undefined =>
-  getAgentFromRunContext(runContext)?.executionId;
+const INVESTIGATION_TOOL_DESCRIPTION = `Append an analysis pipeline to the frozen Discover query
+and compare its numeric result over the selected and equal-length previous periods. Discover applies
+both time ranges and frozen filters outside the ES|QL text.
+
+Choose queries from the mission, available columns, and prior results rather than a fixed field
+order. Work in at most two waves: issue one to three independent exploration calls together, then
+zero to two verification calls for the strongest lead or most important gap. Do not repeat queries.
+
+For raw events, produce a numeric STATS metric with stable aliases, then normally SORT and LIMIT.
+Use ES|QL assignment syntax such as
+\`STATS event_count = COUNT(*) BY host.keyword | SORT event_count DESC | LIMIT 10\`; never SQL AS.
+Use quoted LIKE or RLIKE patterns, not JavaScript /regex/ literals, and do not invent functions.
+When the frozen query already returns aggregates, compare its numeric metric instead of counting
+the aggregate rows.
+
+A rejected query says nothing about field availability; correct it when budget remains. Empty or
+constant output means only that the check was not useful. Rows marked requiresVerification are
+one-sided bounded results and deliberately have no evidenceRowId. Verify an exact key with a scalar
+aggregation before claiming it appeared or disappeared; otherwise omit it. To prove absence, use an
+aggregation that returns numeric zero rather than an empty result.
+
+When focus is present, re-check that previous lead. Narrow dimension values with
+\`WHERE MV_CONTAINS(field, value::field_type)\` because Elasticsearch fields may be single- or
+multi-valued. If all focused checks are empty, correct the filter or report that the lead could not
+be reproduced.`;
+
+const composeQuery = (baseQuery: string, pipeline?: string): string => {
+  const normalizedPipeline = pipeline?.replace(/^\s*\|\s*/, '').trim();
+  const query = normalizedPipeline ? `${baseQuery.trim()}\n| ${normalizedPipeline}` : baseQuery;
+  let parserError: string | undefined;
+  try {
+    const { errors } = Parser.parseQuery(query);
+    if (errors.length === 0) {
+      return query;
+    }
+    parserError = errors[0]?.message;
+  } catch {
+    // Report all parser failures through the tool contract below.
+  }
+  throw new InvestigationError(
+    'query_rejected',
+    400,
+    parserError ? `Invalid ES|QL: ${parserError}` : 'The proposed ES|QL query is not valid'
+  );
+};
 
 const columnIndex = (columns: Array<{ name: string }>, name: string): number => {
   const index = columns.findIndex((column) => column.name === name);
   if (index === -1) {
-    throw new InvestigationError('execution_failed', 500, `Guarded ES|QL did not return ${name}`);
+    throw new InvestigationError(
+      'query_rejected',
+      400,
+      `The query did not return the declared column "${name}"`
+    );
   }
   return index;
 };
 
-const normalizeRows = ({
+const evidenceValue = (value: FieldValue): EvidenceValue => {
+  if (
+    value === null ||
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    typeof value === 'boolean'
+  ) {
+    return value;
+  }
+  throw new InvestigationError(
+    'query_rejected',
+    400,
+    'The evidence key must be a scalar string, number, boolean, or null'
+  );
+};
+
+const numericValue = (value: FieldValue, metricColumn: string): number => {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  throw new InvestigationError(
+    'query_rejected',
+    400,
+    `The declared metric column "${metricColumn}" must contain finite numbers`
+  );
+};
+
+const normalizePeriod = ({
   columns,
   values,
   keyColumn,
+  metricColumn,
 }: {
   columns: Array<{ name: string }>;
   values: FieldValue[][];
   keyColumn?: string;
-}): { rows: EvidenceInputRow[]; comparisonChangeMass?: ChangeMass } => {
-  const selectionIndex = columnIndex(columns, 'selection_count');
-  const baselineIndex = columnIndex(columns, 'baseline_count');
-  if (values.length === 0) {
-    return { rows: keyColumn ? [] : [{ key: 'total', selectionCount: 0, baselineCount: 0 }] };
-  }
+  metricColumn: string;
+}): Map<string, { key: EvidenceValue; value: number }> => {
+  const metricIndex = columnIndex(columns, metricColumn);
   const keyIndex = keyColumn ? columnIndex(columns, keyColumn) : -1;
-  const numberAt = (row: FieldValue[], index: number) =>
-    typeof row[index] === 'number' ? row[index] : 0;
-  const keyAt = (row: FieldValue[]): EvidenceValue => {
-    const value = row[keyIndex];
-    return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'
-      ? value
-      : null;
-  };
-  const rows = values.map((row) => ({
-    key: keyColumn ? keyAt(row) : 'total',
-    selectionCount: numberAt(row, selectionIndex),
-    baselineCount: numberAt(row, baselineIndex),
+  if (!keyColumn && values.length > 1) {
+    throw new InvestigationError(
+      'query_rejected',
+      400,
+      'A comparison without a key column must return at most one row per period'
+    );
+  }
+
+  const normalized = new Map<string, { key: EvidenceValue; value: number }>();
+  values.forEach((row) => {
+    const key = keyColumn ? evidenceValue(row[keyIndex]) : ('total' as const);
+    const id = `${key === null ? 'null' : typeof key}:${String(key)}`;
+    if (normalized.has(id)) {
+      throw new InvestigationError(
+        'query_rejected',
+        400,
+        `The declared key column "${keyColumn}" does not uniquely identify result rows`
+      );
+    }
+    normalized.set(id, { key, value: numericValue(row[metricIndex], metricColumn) });
+  });
+  return normalized;
+};
+
+const mergePeriods = (
+  selection: Map<string, { key: EvidenceValue; value: number }>,
+  baseline: Map<string, { key: EvidenceValue; value: number }>
+) => {
+  const selectionIds = [...selection.keys()];
+  const baselineIds = [...baseline.keys()];
+  const ids: string[] = [];
+  const seen = new Set<string>();
+
+  // Preserve both query orderings so the server does not rank findings, while still including
+  // values that were returned by only one period.
+  for (let index = 0; index < Math.max(selectionIds.length, baselineIds.length); index++) {
+    for (const id of [selectionIds[index], baselineIds[index]]) {
+      if (id !== undefined && !seen.has(id)) {
+        seen.add(id);
+        ids.push(id);
+      }
+    }
+  }
+
+  return ids.map((id) => ({
+    key: selection.get(id)?.key ?? baseline.get(id)?.key ?? null,
+    selectionValue: selection.get(id)?.value ?? null,
+    baselineValue: baseline.get(id)?.value ?? null,
   }));
-  if (!keyColumn) return { rows: rows.slice(0, 1) };
-  const positiveIndex = columnIndex(columns, 'investigation_positive_mass');
-  const negativeIndex = columnIndex(columns, 'investigation_negative_mass');
-  return {
-    rows,
-    // Movement across every group, not just the ten rows kept — Elasticsearch sums it before the
-    // cut-off. Kept split by direction: a row that fell is a share of what fell, not of what rose.
-    comparisonChangeMass: {
-      positive: numberAt(values[0], positiveIndex),
-      negative: numberAt(values[0], negativeIndex),
-    },
-  };
 };
 
-const fieldAllowedForPurpose = (
-  policy: InvestigationExecutionPolicy,
-  purpose: EvidencePurpose,
-  field: string
-): boolean => {
-  if (purpose === 'contributors') {
-    return policy.profile.characteristicFields.some(({ name }) => name === field);
-  }
-
-  return policy.profile.messageField?.name === field;
-};
-
-/**
- * Why the server would turn a probe away, or nothing if it may run. Every reason here is settled
- * before Elasticsearch is touched, which is what lets a refusal cost no query budget.
- */
-const refuseProbeRequest = ({
-  policy,
-  purpose,
-  field,
-  scope,
-  resolvedScope,
-}: {
-  policy: InvestigationExecutionPolicy;
-  purpose: EvidencePurpose;
-  field?: string;
-  scope?: { evidenceId: string; evidenceRowId: string };
-  resolvedScope: ReturnType<EvidenceLedger['resolve']> | undefined;
-}): string | undefined => {
-  if (purpose !== 'total' && (!field || !fieldAllowedForPurpose(policy, purpose, field))) {
-    return 'Probe field is outside the server-resolved log profile';
-  }
-  if (scope && (!resolvedScope || resolvedScope.record.purpose === 'total')) {
-    return 'Probe scope must reference existing non-total evidence from this investigation';
-  }
-  const scopedFields = new Set(policy.context.scopes?.map(({ field: scopeField }) => scopeField));
-  let currentScope = resolvedScope;
-  while (currentScope) {
-    scopedFields.add(currentScope.record.dimension);
-    currentScope = currentScope.record.scope
-      ? policy.ledger.resolve(currentScope.record.scope) ?? undefined
-      : undefined;
-  }
-  if (field && scopedFields.has(field)) {
-    return 'Probe field is already fixed by the current investigation scope';
-  }
-  if (scope && !policy.ledger.isScopeNarrowing(scope)) {
-    return 'Probe scope does not narrow the current investigation population';
-  }
-};
-
-export const executeGuardedInvestigationQuery = async ({
+const executeGuardedInvestigationQuery = async ({
   policy,
   esClient,
-  purpose,
-  field,
-  scope,
+  wave,
+  pipeline,
+  keyColumn,
+  metricColumn,
+  label,
+  rationale,
 }: {
   policy: InvestigationExecutionPolicy;
   esClient: IScopedClusterClient;
-  purpose: EvidencePurpose;
-  field?: string;
-  scope?: { evidenceId: string; evidenceRowId: string };
+  wave: InvestigationProbeWave;
+  pipeline?: string;
+  keyColumn?: string;
+  metricColumn: string;
+  label: string;
+  rationale: string;
 }) => {
-  const resolvedScope = scope ? policy.ledger.resolve(scope) : undefined;
-  const refusal = refuseProbeRequest({ policy, purpose, field, scope, resolvedScope });
-  if (refusal) {
+  let query: string;
+  try {
+    query = composeQuery(policy.context.query, pipeline);
+  } catch (error) {
     policy.recordRejection();
-    throw new InvestigationError('query_rejected', 400, refusal);
+    throw error;
   }
-  policy.reserveAttempt();
+  const signature = JSON.stringify({ query, keyColumn: keyColumn ?? null, metricColumn });
+  let releaseProbe: () => void;
+  try {
+    releaseProbe = policy.beginProbe({ wave, signature });
+  } catch (error) {
+    policy.recordRejection();
+    throw error;
+  }
+  let comparison: number;
+  try {
+    comparison = policy.reserveComparison();
+  } catch (error) {
+    releaseProbe();
+    throw error;
+  }
 
-  const phase: InvestigationPhase = purpose;
-  const progressStep = {
-    stepId: `${purpose}-${policy.attempts}`,
-    phase,
-    ...(field ? { field } : {}),
-    ...(resolvedScope
-      ? {
-          scope: {
-            field: resolvedScope.record.dimension,
-            value: resolvedScope.row.key,
-          },
-        }
-      : {}),
+  const progressStep: Omit<InvestigationProgressStep, 'status'> = {
+    stepId: `query-${comparison}`,
+    phase: 'query',
+    wave,
+    label,
+    rationale,
   };
   policy.onPhase(progressStep, 'start');
-  try {
-    const frozen = freezeDiscoverQuery(policy.context.query);
-    const evidenceScope: InvestigationScope | undefined = resolvedScope
-      ? {
-          field: resolvedScope.record.dimension,
-          value: resolvedScope.row.key,
-          mode: resolvedScope.record.purpose === 'patterns' ? 'rlike' : 'equals',
-        }
-      : undefined;
-    const composed = composeInvestigationQuery({
-      frozen,
-      timeField: policy.context.timeField,
-      selection: policy.ledger.selection,
-      baseline: policy.ledger.baseline,
-      field,
-      total: purpose === 'total',
-      categorize: purpose === 'patterns',
-      scopes: [...(policy.context.scopes ?? []), ...(evidenceScope ? [evidenceScope] : [])],
-    });
-    const params = getNamedParams(
-      composed.query,
-      undefined,
-      Object.values(policy.context.variables)
-    );
-    const filter =
-      policy.context.filters.length > 0
-        ? buildEsQuery(undefined, [], policy.context.filters)
-        : undefined;
-    const queryTimeoutController = new AbortController();
-    const queryTimeout = setTimeout(
-      () => queryTimeoutController.abort('query_timeout'),
-      INVESTIGATION_QUERY_TIMEOUT_MS
-    );
-    queryTimeout.unref?.();
-    const signal = AbortSignal.any([policy.signal, queryTimeoutController.signal]);
-    // Investigation probes run with the user's Elasticsearch privileges; they never elevate.
-    const response = await esClient.asCurrentUser.esql
-      .query(
-        {
-          query: composed.query,
-          ...(params.length > 0 ? { params: params as EsqlESQLParams } : {}),
-          ...(filter ? { filter } : {}),
-        },
-        {
-          signal,
-          requestTimeout: INVESTIGATION_QUERY_TIMEOUT_MS,
-          maxRetries: 0,
-          maxResponseSize: INVESTIGATION_MAX_RESPONSE_BYTES,
-        }
-      )
-      .finally(() => clearTimeout(queryTimeout));
+  const pairAbortController = new AbortController();
+  const signal = AbortSignal.any([policy.signal, pairAbortController.signal]);
+  const periodRequests = [
+    executeInvestigationEsql({
+      esClient,
+      query,
+      timeRange: policy.ledger.selection,
+      context: policy.context,
+      signal,
+    }),
+    executeInvestigationEsql({
+      esClient,
+      query,
+      timeRange: policy.ledger.baseline,
+      context: policy.context,
+      signal,
+    }),
+  ] as const;
 
-    const normalized = normalizeRows({
-      ...response,
-      ...(purpose === 'total'
-        ? {}
-        : { keyColumn: purpose === 'patterns' ? 'investigation_pattern' : field! }),
+  try {
+    const [selectionResult, baselineResult] = await Promise.all(periodRequests);
+    const selection = normalizePeriod({
+      ...selectionResult.response,
+      keyColumn,
+      metricColumn,
+    });
+    const baseline = normalizePeriod({
+      ...baselineResult.response,
+      keyColumn,
+      metricColumn,
     });
     const record = createEvidenceRecord({
       runId: policy.runId,
-      purpose,
-      dimension: purpose === 'total' ? 'total' : field!,
-      query: composed.query,
-      documentsQuery: composed.documentsQuery,
+      query,
+      keyColumn,
+      metricColumn,
       selection: policy.ledger.selection,
       baseline: policy.ledger.baseline,
-      inputRows: normalized.rows,
-      comparisonChangeMass: normalized.comparisonChangeMass,
-      filterCount: policy.context.filters.length + frozen.whereCount,
-      documentsFilterMode: purpose === 'patterns' ? 'rlike' : 'equals',
-      scopeReference: scope,
+      filterCount: policy.context.filters.length,
+      esqlExecutionMs: Math.max(selectionResult.executionMs, baselineResult.executionMs),
+      values: mergePeriods(selection, baseline),
     });
     policy.ledger.add(record);
-    policy.onPhase(progressStep, 'success');
+    policy.onPhase(
+      {
+        ...progressStep,
+        result: {
+          rowCount: record.rows.length,
+          esqlExecutionMs: record.esqlExecutionMs,
+        },
+      },
+      'success'
+    );
     return record;
   } catch (error) {
+    pairAbortController.abort('paired_query_failed');
+    await Promise.allSettled(periodRequests);
     policy.onPhase(progressStep, 'failure');
     throw error;
+  } finally {
+    releaseProbe();
   }
 };
 
 const toolResult = (
   record: Awaited<ReturnType<typeof executeGuardedInvestigationQuery>>,
-  ledger: EvidenceLedger
+  policy: InvestigationExecutionPolicy,
+  wave: InvestigationProbeWave
 ) =>
   createOtherResult({
     evidenceId: record.evidenceId,
-    purpose: record.purpose,
-    dimension: record.dimension,
-    scope: record.scope,
-    query: record.query,
-    rows: record.rows.map(
-      ({
-        evidenceRowId,
-        typedKey,
-        selectionCount,
-        baselineCount,
-        delta,
-        absoluteChange,
-        relativeChange,
-        poissonNormalizedChange,
-        candidateShare,
-        direction,
-        material,
-      }) => ({
-        evidenceRowId,
-        typedKey,
-        selectionCount,
-        baselineCount,
-        delta,
-        absoluteChange,
-        relativeChange,
-        poissonNormalizedChange,
-        candidateShare,
-        direction,
-        material,
-        scopeEligible: ledger.isScopeNarrowing({
-          evidenceId: record.evidenceId,
-          evidenceRowId,
-        }),
-      })
+    comparisonsRemaining: policy.remainingComparisonsAfterWave(wave),
+    rows: record.rows.map((row) =>
+      isComparableEvidenceRow(row)
+        ? row
+        : {
+            key: row.key,
+            selectionValue: row.selectionValue,
+            baselineValue: row.baselineValue,
+            requiresVerification: true,
+          }
     ),
   });
 
@@ -316,12 +355,10 @@ export const createGuardedEsqlTool = (): BuiltinToolDefinition<typeof toolSchema
   type: ToolType.builtin,
   schema: toolSchema,
   tags: ['discover', 'investigation', 'esql'],
-  description:
-    'Run one bounded comparison probe. A probe can be scoped to a row returned by an earlier probe.',
+  description: INVESTIGATION_TOOL_DESCRIPTION,
   confirmation: { askUser: 'never' },
-  handler: async ({ purpose, field, scope }: GuardedToolInput, { esClient, runContext }) => {
-    const executionId = getExecutionId(runContext);
-    const policy = executionId ? getInvestigationPolicy(executionId) : undefined;
+  handler: async (input: GuardedToolInput, { esClient, request }) => {
+    const policy = getInvestigationPolicy(request);
     if (!policy) {
       throw new InvestigationError(
         'protocol_violation',
@@ -332,10 +369,8 @@ export const createGuardedEsqlTool = (): BuiltinToolDefinition<typeof toolSchema
     const record = await executeGuardedInvestigationQuery({
       policy,
       esClient,
-      purpose,
-      field,
-      scope,
+      ...input,
     });
-    return { results: [toolResult(record, policy.ledger)] };
+    return { results: [toolResult(record, policy, input.wave)] };
   },
 });

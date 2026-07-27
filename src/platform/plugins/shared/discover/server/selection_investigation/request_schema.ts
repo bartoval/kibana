@@ -9,20 +9,20 @@
 
 import { schema } from '@kbn/config-schema';
 import { validate as uuidValidate } from 'uuid';
-import { SELECTION_INVESTIGATION_MAX_SCOPE_DEPTH } from '../../common';
+import { SELECTION_INVESTIGATION_MAX_GOAL_LENGTH } from '../../common/selection_investigation';
 import {
-  INVESTIGATION_MAX_CONTEXT_STRING_CHARS,
+  INVESTIGATION_MAX_FIELD_VALUE_LENGTH,
   INVESTIGATION_MAX_FILTERS,
-  INVESTIGATION_MAX_QUERY_LENGTH,
+  INVESTIGATION_MAX_VARIABLES,
   INVESTIGATION_MAX_VALUES_PER_VARIABLE,
 } from './constants';
 
 const variableValueSchema = schema.oneOf([
-  schema.string({ maxLength: INVESTIGATION_MAX_CONTEXT_STRING_CHARS }),
+  schema.string({ maxLength: INVESTIGATION_MAX_FIELD_VALUE_LENGTH }),
   schema.number(),
   schema.arrayOf(
     schema.oneOf([
-      schema.string({ maxLength: INVESTIGATION_MAX_CONTEXT_STRING_CHARS }),
+      schema.string({ maxLength: INVESTIGATION_MAX_FIELD_VALUE_LENGTH }),
       schema.number(),
     ]),
     {
@@ -35,10 +35,11 @@ export const requestSchema = schema.object({
   requestId: schema.string({
     validate: (value) => (uuidValidate(value) ? undefined : 'requestId must be a UUID'),
   }),
-  query: schema.string({ minLength: 1, maxLength: INVESTIGATION_MAX_QUERY_LENGTH }),
+  goal: schema.string({ minLength: 1, maxLength: SELECTION_INVESTIGATION_MAX_GOAL_LENGTH }),
+  query: schema.string({ minLength: 1 }),
   timeField: schema.string({
     minLength: 1,
-    maxLength: INVESTIGATION_MAX_CONTEXT_STRING_CHARS,
+    maxLength: INVESTIGATION_MAX_FIELD_VALUE_LENGTH,
   }),
   selection: schema.object({
     from: schema.string({ minLength: 1, maxLength: 100 }),
@@ -47,8 +48,26 @@ export const requestSchema = schema.object({
   filters: schema.arrayOf(schema.object({}, { unknowns: 'allow' }), {
     maxSize: INVESTIGATION_MAX_FILTERS,
   }),
-  variables: schema.recordOf(
-    schema.string({ minLength: 1, maxLength: 512 }),
+  focus: schema.maybe(
+    schema.object({
+      title: schema.string({ minLength: 1, maxLength: 100 }),
+      summary: schema.string({ minLength: 1, maxLength: 500 }),
+      kind: schema.oneOf([
+        schema.literal('metric'),
+        schema.literal('dimension'),
+        schema.literal('pattern'),
+      ]),
+      dimension: schema.string({
+        minLength: 1,
+        maxLength: INVESTIGATION_MAX_FIELD_VALUE_LENGTH,
+      }),
+      value: schema.string({ maxLength: INVESTIGATION_MAX_FIELD_VALUE_LENGTH }),
+      selectionValue: schema.number(),
+      baselineValue: schema.number(),
+      query: schema.string({ minLength: 1 }),
+    })
+  ),
+  variables: schema.arrayOf(
     schema.object({
       key: schema.string({ minLength: 1, maxLength: 512 }),
       value: variableValueSchema,
@@ -59,22 +78,7 @@ export const requestSchema = schema.object({
         schema.literal('multi_values'),
         schema.literal('functions'),
       ]),
-    })
-  ),
-  scopes: schema.maybe(
-    schema.arrayOf(
-      schema.object({
-        field: schema.string({ minLength: 1, maxLength: INVESTIGATION_MAX_CONTEXT_STRING_CHARS }),
-        value: schema.nullable(
-          schema.oneOf([
-            schema.string({ maxLength: INVESTIGATION_MAX_CONTEXT_STRING_CHARS }),
-            schema.number(),
-            schema.boolean(),
-          ])
-        ),
-        mode: schema.oneOf([schema.literal('equals'), schema.literal('rlike')]),
-      }),
-      { maxSize: SELECTION_INVESTIGATION_MAX_SCOPE_DEPTH }
-    )
+    }),
+    { maxSize: INVESTIGATION_MAX_VARIABLES }
   ),
 });

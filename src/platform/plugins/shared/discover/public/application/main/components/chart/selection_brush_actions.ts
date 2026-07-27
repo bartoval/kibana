@@ -21,6 +21,7 @@ export interface SelectionBrushContext {
    */
   instanceId: string;
   applySelection: () => void;
+  openInvestigation: () => void;
 }
 
 /**
@@ -30,11 +31,9 @@ export interface SelectionBrushContext {
 export const createSelectionBrushActions = ({
   instanceId,
   canInvestigate,
-  onInvestigate,
 }: {
   instanceId: string;
   canInvestigate: boolean;
-  onInvestigate: () => void;
 }): Array<UiActionsActionDefinition<SelectionBrushContext>> => {
   const belongsToThisInstance = async (context: SelectionBrushContext) =>
     context.instanceId === instanceId;
@@ -59,10 +58,10 @@ export const createSelectionBrushActions = ({
       getIconType: () => 'search',
       getDisplayName: () =>
         i18n.translate('discover.investigateSelection.actionLabel', {
-          defaultMessage: 'Find what changed',
+          defaultMessage: 'Investigate this period…',
         }),
       isCompatible: async (context) => canInvestigate && (await belongsToThisInstance(context)),
-      execute: async () => onInvestigate(),
+      execute: async ({ openInvestigation }) => openInvestigation(),
     },
   ];
 };

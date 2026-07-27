@@ -11,54 +11,38 @@ import type { Filter } from '@kbn/es-query';
 import type { ESQLControlVariable } from '@kbn/esql-types';
 
 export const SELECTION_INVESTIGATION_ROUTE = '/internal/discover/selection_investigation' as const;
-export const SELECTION_INVESTIGATION_MAX_SCOPE_DEPTH = 4;
+export const SELECTION_INVESTIGATION_MAX_GOAL_LENGTH = 500;
 
-export type InvestigationPhase = 'total' | 'planning' | 'contributors' | 'patterns';
+export type InvestigationPhase = 'planning' | 'query' | 'synthesis';
 export type InvestigationPhaseStatus = 'start' | 'success' | 'failure';
-export type InvestigationDirection = 'increased' | 'decreased' | 'new' | 'disappeared';
-export type InvestigationDocumentsTimeScope = 'selection' | 'baseline';
-export type InvestigationFindingKind = 'volume' | 'contributor' | 'pattern';
-export type InvestigationTriagePriority = 'investigate_now' | 'monitor' | 'informational';
-export type InvestigationTriageSignal =
-  | 'material_change'
-  | 'new_activity'
-  | 'disappeared_activity'
-  | 'large_shift'
-  | 'concentrated_shift'
-  | 'scoped_change'
-  | 'message_pattern'
-  | 'multiple_evidence';
-export type InvestigationModelTriageSignal = Exclude<InvestigationTriageSignal, 'material_change'>;
-export type InvestigationTriageAction = 'show_documents' | 'open_query';
-export type InvestigationCoverageIssue =
-  | 'selection_empty'
-  | 'baseline_empty'
-  | 'no_checks_completed';
+export type InvestigationDirection = 'increased' | 'decreased' | 'unchanged';
+export type InvestigationFindingKind = 'metric' | 'dimension' | 'pattern';
+type InvestigationVariable = Pick<ESQLControlVariable, 'key' | 'value' | 'type'>;
 
 /**
- * Whether this row can still be broken down, and if not why. `not_applicable` is the overall
- * volume finding, which has nothing above it to narrow.
+ * A finding selected as the starting lead for a new run. It guides the model but is not evidence;
+ * the new investigation must support its answer with results produced in that run.
  */
-export type InvestigationDeeperInvestigation =
-  | 'available'
-  | 'change_too_small'
-  | 'max_depth_reached'
-  | 'not_applicable';
-
-export interface InvestigationScope {
-  field: string;
-  value: string | number | boolean | null;
-  mode: 'equals' | 'rlike';
+export interface InvestigationFocus {
+  title: string;
+  summary: string;
+  kind: InvestigationFindingKind;
+  dimension: string;
+  value: string;
+  selectionValue: number;
+  baselineValue: number;
+  query: string;
 }
 
 export interface SelectionInvestigationRequest {
   requestId: string;
+  goal: string;
   query: string;
   timeField: string;
   selection: { from: string; to: string };
   filters: Filter[];
-  variables: Record<string, ESQLControlVariable>;
-  scopes?: InvestigationScope[];
+  variables: InvestigationVariable[];
+  focus?: InvestigationFocus;
 }
 
 export interface InvestigationTimeRange {
@@ -75,89 +59,100 @@ export interface InvestigationProgressStep {
   stepId: string;
   phase: InvestigationPhase;
   status: InvestigationPhaseStatus;
-  field?: string;
-  scope?: {
-    field: string;
-    value: string | number | boolean | null;
+  wave?: 'exploration' | 'verification';
+  label?: string;
+  rationale?: string;
+  result?: {
+    rowCount: number;
+    esqlExecutionMs?: number;
   };
 }
 
 export interface InvestigationModelOutput {
-  candidates: Array<{
-    primary: InvestigationEvidenceReference;
-    patternTokens: string[];
-    triage: {
-      priority: InvestigationTriagePriority;
-      signals: InvestigationModelTriageSignal[];
-      nextAction: InvestigationTriageAction;
-    };
-  }>;
+  answer: {
+    status: InvestigationAnswerStatus;
+    title: string;
+    summary: string;
+    nextStep: string;
+    followUps: Array<{
+      goal: string;
+      reason: string;
+      evidence: InvestigationEvidenceReference[];
+    }>;
+    candidates: Array<{
+      primary: InvestigationEvidenceReference;
+      kind: InvestigationFindingKind;
+      title: string;
+      interpretation: string;
+      openQuestion: string;
+    }>;
+  };
 }
 
 export interface InvestigationPreviewRow {
   key: string;
-  selectionCount: number;
-  baselineCount: number;
+  selectionValue: number;
+  baselineValue: number;
   delta: number;
 }
 
 export interface InvestigationFinding {
   id: string;
+  title: string;
+  summary: string;
   kind: InvestigationFindingKind;
   dimension: string;
   value: string;
-  patternTokens: string[];
-  investigationPath: Array<{
-    dimension: string;
-    value: string;
-  }>;
   direction: InvestigationDirection;
-  selectionCount: number;
-  baselineCount: number;
+  selectionValue: number;
+  baselineValue: number;
   absoluteChange: number;
   relativeChange: number | null;
-  candidateShare: number;
   selection: InvestigationTimeRange;
   baseline: InvestigationTimeRange;
   filterCount: number;
   query: string;
-  documentsQuery: string;
-  documentsTimeScope: InvestigationDocumentsTimeScope;
   preview: InvestigationPreviewRow[];
-  triage: InvestigationFindingTriage;
-  scopes: InvestigationScope[];
-  deeperInvestigation: InvestigationDeeperInvestigation;
 }
 
-/**
- * The server decides what to say; every wording is derived on the browser from these codes, so
- * the text follows the reader's locale rather than the Kibana server's.
- */
-export interface InvestigationFindingTriage {
-  priority: InvestigationTriagePriority;
-  signals: InvestigationTriageSignal[];
-  nextAction: InvestigationTriageAction;
+export type InvestigationAnswerStatus =
+  | 'supported'
+  | 'partially_supported'
+  | 'no_signal_found'
+  | 'inconclusive'
+  | 'insufficient_observability';
+
+export interface InvestigationAnswer {
+  status: InvestigationAnswerStatus;
+  title: string;
+  summary: string;
+  nextStep: string;
+  followUps: InvestigationFollowUp[];
 }
 
-export interface InvestigationTriage extends InvestigationFindingTriage {
-  findingId: string;
+export interface InvestigationFollowUp {
+  goal: string;
+  reason: string;
+}
+
+export interface InvestigationRuntimeTimings {
+  /** Time until Agent Builder emits the first exploration decision, including execution setup. */
+  planningAndSetupMs?: number;
+  /** Time between completed exploration probes and the verification decision. */
+  verificationDecisionMs?: number;
+  /**
+   * Time from the final probe result to the structured answer. Agent Builder's public event stream
+   * does not expose the research handoff and structured synthesis as separate phases.
+   */
+  handoffAndSynthesisMs?: number;
+  totalAgentMs: number;
+  investigativeDecisionCount: number;
 }
 
 export interface SelectionInvestigationResult {
-  outcome:
-    | 'changes_found'
-    // The volume moved, but none of the fields checked accounts for it.
-    | 'unexplained_change'
-    | 'no_material_change'
-    | 'insufficient_evidence';
   findings: InvestigationFinding[];
-  /**
-   * Who picked these findings. `server_ranking` means the agent settled on nothing the evidence
-   * supported, so the server ranked what its probes had already collected.
-   */
-  findingsSelectedBy?: 'agent' | 'server_ranking';
-  triage?: InvestigationTriage;
-  insufficientEvidenceReason?: InvestigationCoverageIssue;
+  answer: InvestigationAnswer;
+  timings?: InvestigationRuntimeTimings;
 }
 
 export type SelectionInvestigationSseEvent =

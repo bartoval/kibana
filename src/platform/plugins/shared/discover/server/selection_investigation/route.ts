@@ -11,20 +11,21 @@ import { v4 as uuidv4 } from 'uuid';
 import type { CoreSetup, IRouter, Logger, RequestHandlerContext } from '@kbn/core/server';
 import type { ServerSentEvent } from '@kbn/sse-utils';
 import { cloudProxyBufferSize, observableIntoEventSourceStream } from '@kbn/sse-utils-server';
-import { ReplaySubject, type Subscription } from 'rxjs';
 import { apiPrivileges } from '@kbn/agent-builder-plugin/common/features';
-import type { SelectionInvestigationRequest } from '../../common/selection_investigation';
-import { SELECTION_INVESTIGATION_ROUTE } from '../../common';
+import { ReplaySubject, type Subscription } from 'rxjs';
+import {
+  SELECTION_INVESTIGATION_ROUTE,
+  type SelectionInvestigationRequest,
+} from '../../common/selection_investigation';
 import type { DiscoverServerPluginStartDeps } from '..';
 import { INVESTIGATION_MAX_BODY_BYTES, INVESTIGATION_RUN_TIMEOUT_MS } from './constants';
 import { requestSchema } from './request_schema';
 import { SSE_RESPONSE_HEADERS, toSseEvent } from './sse_events';
 import { runInvestigation } from './run_investigation';
 import { InvestigationExecutionPolicy, registerInvestigationPolicy } from './policy';
-import { areScopesWithinProfile, resolveLogCoverageProfile, withFieldCardinality } from './profile';
+import { resolveInvestigationProfile } from './profile';
 import { InvestigationError, isInvestigationError } from './errors';
 import { EvidenceLedger } from './evidence';
-import { freezeDiscoverQuery } from './query';
 
 const calculateRanges = (selection: {
   from: string;
@@ -95,10 +96,37 @@ export const registerSelectionInvestigationRoute = ({
 
       let releasePolicy: (() => void) | undefined;
       let requestAbortSubscription: Subscription | undefined;
+      let runTimeout: ReturnType<typeof setTimeout> | undefined;
+      let transportReleased = false;
+      const releaseTransportOnce = () => {
+        if (transportReleased) {
+          return;
+        }
+        transportReleased = true;
+        if (runTimeout) {
+          clearTimeout(runTimeout);
+        }
+        requestAbortSubscription?.unsubscribe();
+      };
+      let policyReleased = false;
+      const releasePolicyOnce = () => {
+        if (policyReleased) {
+          return;
+        }
+        policyReleased = true;
+        releasePolicy?.();
+      };
+      const releaseOnce = () => {
+        releaseTransportOnce();
+        releasePolicyOnce();
+      };
       try {
         const ranges = calculateRanges(body.selection);
-        const normalizedBody = { ...body, selection: ranges.selection };
-        const frozen = freezeDiscoverQuery(normalizedBody.query);
+        const goal = body.goal.trim();
+        if (!goal) {
+          throw new InvestigationError('invalid_context', 400, 'An investigation goal is required');
+        }
+        const normalizedBody = { ...body, goal, selection: ranges.selection };
         const coreContext = await context.core;
 
         const executionAbortController = new AbortController();
@@ -109,43 +137,17 @@ export const registerSelectionInvestigationRoute = ({
         const executionId = uuidv4();
         const runId = executionId;
         const ledger = new EvidenceLedger(runId, ranges.selection, ranges.baseline);
-        const profile = await resolveLogCoverageProfile({
+        const profile = await resolveInvestigationProfile({
           esClient: coreContext.elasticsearch.client,
-          source: frozen.source,
-          timeField: normalizedBody.timeField,
-          signal: executionAbortController.signal,
-        });
-        if (normalizedBody.scopes && !areScopesWithinProfile(normalizedBody.scopes, profile)) {
-          throw new InvestigationError(
-            'invalid_context',
-            400,
-            'The investigation scopes are outside the server-resolved log profile'
-          );
-        }
-        const discriminatingProfile = await withFieldCardinality({
-          esClient: coreContext.elasticsearch.client,
-          frozen,
-          timeField: normalizedBody.timeField,
+          query: normalizedBody.query,
           union: { from: ranges.baseline.from, to: ranges.selection.to },
-          profile,
-          scopes: normalizedBody.scopes ?? [],
+          context: normalizedBody,
           signal: executionAbortController.signal,
-          logger,
         });
-        if (
-          discriminatingProfile.characteristicFields.length === 0 &&
-          discriminatingProfile.messageField === undefined
-        ) {
-          throw new InvestigationError(
-            'invalid_context',
-            400,
-            'The ES|QL source does not match the bounded log profile'
-          );
-        }
         const policy = new InvestigationExecutionPolicy({
           runId,
           context: normalizedBody,
-          profile: discriminatingProfile,
+          profile,
           ledger,
           signal: executionAbortController.signal,
           onPhase: (step, status) => {
@@ -154,33 +156,25 @@ export const registerSelectionInvestigationRoute = ({
             }
           },
         });
-        releasePolicy = registerInvestigationPolicy(executionId, policy);
+        releasePolicy = registerInvestigationPolicy(request, policy);
 
-        // An investigation can end four ways: it finishes, it errors, the browser goes away, or it
-        // runs out of time. Whichever happens first, the clean-up below must run exactly once.
-        let released = false;
-        const releaseOnce = () => {
-          if (released) {
-            return;
-          }
-          released = true;
-          clearTimeout(runTimeout);
-          requestAbortSubscription?.unsubscribe();
-          releasePolicy?.();
-        };
-
-        requestAbortSubscription = request.events.aborted$.subscribe(() => {
-          executionAbortController.abort('client');
-          responseAbortController.abort('client');
-          output$.complete();
-        });
-        const runTimeout = setTimeout(() => {
+        // Disconnect and timeout close the transport immediately. The policy stays registered until
+        // Agent Builder settles, so a late tool call is still denied by the request-scoped hook.
+        runTimeout = setTimeout(() => {
           executionAbortController.abort('timeout');
           if (!output$.closed) {
             output$.next(toSseEvent({ type: 'aborted', data: { reason: 'timeout' } }));
             output$.complete();
           }
+          // Keep the policy active until Agent Builder settles so no late built-in tool can run.
+          releaseTransportOnce();
         }, INVESTIGATION_RUN_TIMEOUT_MS);
+        requestAbortSubscription = request.events.aborted$.subscribe(() => {
+          executionAbortController.abort('client');
+          responseAbortController.abort('client');
+          output$.complete();
+          releaseTransportOnce();
+        });
 
         output$.next(
           toSseEvent({
@@ -195,12 +189,9 @@ export const registerSelectionInvestigationRoute = ({
 
         // The investigation itself is deliberately not awaited: the handler returns the stream
         // straight away, and the work below keeps pushing events into it until it is done.
-        // Not awaited: the handler returns the stream immediately and the run keeps pushing
-        // events into it until it settles.
         void runInvestigation({
           policy,
           ledger,
-          esClient: coreContext.elasticsearch.client,
           request,
           agentBuilder: startDeps.agentBuilder,
           executionId,
@@ -219,7 +210,7 @@ export const registerSelectionInvestigationRoute = ({
           }),
         });
       } catch (error) {
-        releasePolicy?.();
+        releaseOnce();
         const normalizedError = error instanceof Error ? error : new Error(String(error));
         logger.error(normalizedError);
         if (isInvestigationError(normalizedError)) {
