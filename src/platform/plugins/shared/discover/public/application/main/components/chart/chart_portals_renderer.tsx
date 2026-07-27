@@ -15,6 +15,7 @@ import React, {
   useMemo,
   useCallback,
 } from 'react';
+import { EuiButtonIcon, EuiFlexGroup, EuiFlexItem, EuiToolTip } from '@elastic/eui';
 import { createHtmlPortalNode, type HtmlPortalNode, InPortal } from 'react-reverse-portal';
 import type { UnifiedHistogramPartialLayoutProps } from '@kbn/unified-histogram';
 import { UnifiedHistogramChart, useUnifiedHistogram } from '@kbn/unified-histogram';
@@ -43,6 +44,10 @@ import { useUnifiedHistogramRuntimeState } from './use_unified_histogram_runtime
 import { useUnifiedHistogramCommon } from './use_unified_histogram_common';
 import type { ChartSectionConfiguration } from '../../../../context_awareness/types';
 import { useIsEsqlMode } from '../../hooks/use_is_esql_mode';
+import {
+  SelectionInvestigationProvider,
+  useSelectionInvestigation,
+} from './selection_investigation_provider';
 
 export type ChartPortalNode = HtmlPortalNode;
 export type ChartPortalNodes = Record<string, ChartPortalNode>;
@@ -60,21 +65,23 @@ export const ChartPortalsRenderer = ({
   chartPortalNodes.current = updatePortals(chartPortalNodes.current, allTabIds);
 
   return (
-    <>
-      {Object.keys(chartPortalNodes.current).map((tabId) => {
-        return (
-          <InPortal key={tabId} node={chartPortalNodes.current[tabId]}>
-            <UnifiedHistogramGuard tabId={tabId} runtimeStateManager={runtimeStateManager} />
-          </InPortal>
-        );
-      })}
-      <CurrentTabProvider
-        currentTabId={currentTabId}
-        currentChartPortalNode={chartPortalNodes.current[currentTabId]}
-      >
-        {children}
-      </CurrentTabProvider>
-    </>
+    <SelectionInvestigationProvider>
+      <>
+        {Object.keys(chartPortalNodes.current).map((tabId) => {
+          return (
+            <InPortal key={tabId} node={chartPortalNodes.current[tabId]}>
+              <UnifiedHistogramGuard tabId={tabId} runtimeStateManager={runtimeStateManager} />
+            </InPortal>
+          );
+        })}
+        <CurrentTabProvider
+          currentTabId={currentTabId}
+          currentChartPortalNode={chartPortalNodes.current[currentTabId]}
+        >
+          {children}
+        </CurrentTabProvider>
+      </>
+    </SelectionInvestigationProvider>
   );
 };
 
@@ -139,9 +146,49 @@ const UnifiedHistogramGuard = ({
 
 type UnifiedHistogramChartProps = Pick<UnifiedHistogramGuardProps, 'panelsToggle'>;
 
+const ChartToggleActions = ({
+  tabId,
+  panelsToggle,
+}: {
+  tabId: string;
+  panelsToggle?: ReactElement;
+}) => {
+  const { investigationTabId, isFlyoutOpen, showInvestigation } = useSelectionInvestigation();
+  const canShowInvestigation = investigationTabId === tabId && !isFlyoutOpen;
+
+  if (!canShowInvestigation) {
+    return panelsToggle ?? null;
+  }
+
+  const label = i18n.translate('discover.investigateSelection.show', {
+    defaultMessage: 'Show changes',
+  });
+
+  return (
+    <EuiFlexGroup gutterSize="s" alignItems="center" responsive={false}>
+      <EuiFlexItem grow={false}>
+        <EuiToolTip content={label} disableScreenReaderOutput>
+          <EuiButtonIcon
+            display="base"
+            size="s"
+            iconType="search"
+            aria-label={label}
+            onClick={showInvestigation}
+            data-test-subj="discoverInvestigationShow"
+          />
+        </EuiToolTip>
+      </EuiFlexItem>
+      {panelsToggle && <EuiFlexItem grow={false}>{panelsToggle}</EuiFlexItem>}
+    </EuiFlexGroup>
+  );
+};
+
 const ChartsWrapper = ({ panelsToggle }: UnifiedHistogramChartProps) => {
   const runtimeStateManager = useRuntimeStateManager();
   const currentTabId = useCurrentTabSelector((tab) => tab.id);
+  const chartToggleActions = (
+    <ChartToggleActions tabId={currentTabId} panelsToggle={panelsToggle} />
+  );
   const getChartConfigAccessor = useProfileAccessor('getChartSectionConfiguration');
 
   const isEsqlMode = useIsEsqlMode();
@@ -173,11 +220,11 @@ const ChartsWrapper = ({ panelsToggle }: UnifiedHistogramChartProps) => {
 
   return chartSectionConfig.replaceDefaultChart ? (
     <CustomChartSectionWrapper
-      panelsToggle={panelsToggle}
+      panelsToggle={chartToggleActions}
       chartSectionConfig={chartSectionConfig}
     />
   ) : (
-    <UnifiedHistogramWrapper panelsToggle={panelsToggle} />
+    <UnifiedHistogramWrapper panelsToggle={chartToggleActions} />
   );
 };
 

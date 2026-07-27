@@ -25,6 +25,9 @@ export const AGENT_BUILDER_BUILTIN_TOOLS = [
   // Streams / Significant Events
   ...Object.values(platformSignificantEventsTools),
 
+  // Platform – Discover
+  `${internalNamespaces.platformDiscover}.investigation_esql`,
+
   // Alerting
   `${internalNamespaces.platformAlerting}.manage_rule`,
 

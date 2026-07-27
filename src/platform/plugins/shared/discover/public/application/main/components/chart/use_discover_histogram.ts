@@ -27,6 +27,7 @@ import useLatest from 'react-use/lib/useLatest';
 import type { RequestAdapter } from '@kbn/inspector-plugin/common';
 import type { DatatableColumn } from '@kbn/expressions-plugin/common';
 import { ESQL_TABLE_TYPE } from '@kbn/data-plugin/common';
+import { isOfAggregateQueryType } from '@kbn/es-query';
 import { useProfileAccessor } from '../../../../context_awareness';
 import { useDiscoverCustomization } from '../../../../customizations';
 import { useDiscoverServices } from '../../../../hooks/use_discover_services';
@@ -53,6 +54,7 @@ import {
 } from '../../state_management/redux';
 import { useDataState } from '../../hooks/use_data_state';
 import { getDefinedControlGroupState } from '../../state_management/utils/get_defined_control_group_state';
+import { useSelectionInvestigation } from './selection_investigation_provider';
 
 const EMPTY_ESQL_COLUMNS: DatatableColumn[] = [];
 const TAB_ATTRIBUTE_TO_TRIGGER_CHART_FETCH: Array<keyof UnifiedHistogramFetchParamsExternal> = [
@@ -207,6 +209,7 @@ export const useDiscoverHistogram = (
   const timeInterval = useAppStateSelector((state) => state.interval);
   const breakdownField = useAppStateSelector((state) => state.breakdownField);
   const esqlVariables = useCurrentTabSelector((tab) => tab.esqlVariables);
+  const currentTabId = useCurrentTabSelector((tab) => tab.id);
   const isApproximate = useAppStateSelector((state) => state.isApproximate);
   const visContext = useCurrentTabSelector((tab) => tab.attributes.visContext);
 
@@ -394,6 +397,58 @@ export const useDiscoverHistogram = (
     [timeInterval, dispatch, updateAppState]
   );
 
+  const { canInvestigate, handleBrush } = useSelectionInvestigation();
+  // The host app owns the brush. When an embedder has claimed it with its own onBrushEnd — as
+  // Security's Timeline ES|QL tab does — the investigation stays out of the way instead of
+  // pre-empting it.
+  const investigateOnBrush = canInvestigate && !histogramCustomization?.onBrushEnd;
+  const onBrushEnd = useCallback<NonNullable<UseUnifiedHistogramProps['onBrushEnd']>>(
+    (data) => {
+      const timeField = data.timeFieldName ?? dataView.timeFieldName;
+      if (
+        !investigateOnBrush ||
+        !isEsqlMode ||
+        !isOfAggregateQueryType(query) ||
+        !timeField ||
+        data.range.length < 2
+      ) {
+        histogramCustomization?.onBrushEnd?.(data);
+        return;
+      }
+
+      data.preventDefault();
+      const from = Math.min(data.range[0], data.range[1]);
+      const to = Math.max(data.range[0], data.range[1]);
+      handleBrush({
+        range: data.range,
+        tabId: currentTabId,
+        query: query.esql,
+        timeField,
+        filters,
+        variables: esqlVariables ?? [],
+        applySelection: () => {
+          services.timefilter.setTime({
+            from: new Date(from).toISOString(),
+            to: new Date(to).toISOString(),
+          });
+        },
+      });
+    },
+    [
+      currentTabId,
+      dataView.timeFieldName,
+      esqlVariables,
+      filters,
+      handleBrush,
+      histogramCustomization,
+      investigateOnBrush,
+      isEsqlMode,
+      query,
+      services.timefilter,
+    ]
+  );
+  const effectiveOnBrushEnd = investigateOnBrush ? onBrushEnd : histogramCustomization?.onBrushEnd;
+
   return useMemo(
     () => ({
       setUnifiedHistogramApi,
@@ -407,7 +462,7 @@ export const useDiscoverHistogram = (
         totalHitsResult: undefined,
       },
       onFilter: histogramCustomization?.onFilter,
-      onBrushEnd: histogramCustomization?.onBrushEnd,
+      onBrushEnd: effectiveOnBrushEnd,
       withDefaultActions: histogramCustomization?.withDefaultActions,
       disabledActions: histogramCustomization?.disabledActions,
       isChartLoading,
@@ -418,12 +473,12 @@ export const useDiscoverHistogram = (
     [
       chartHidden,
       histogramCustomization?.disabledActions,
-      histogramCustomization?.onBrushEnd,
       histogramCustomization?.onFilter,
       histogramCustomization?.withDefaultActions,
       isEsqlMode,
       isChartLoading,
       onBreakdownFieldChange,
+      effectiveOnBrushEnd,
       onTimeIntervalChange,
       onVisContextChanged,
       options?.initialLayoutProps?.topPanelHeight,

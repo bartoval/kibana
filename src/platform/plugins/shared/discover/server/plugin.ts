@@ -30,6 +30,8 @@ import { registerSampleData } from './sample_data';
 import { getUiSettings } from './ui_settings';
 import { registerAttachments } from './agent_builder/register_attachments';
 import { registerSkill } from './agent_builder/register_skill';
+import { createGuardedEsqlTool } from './selection_investigation/guarded_esql';
+import { registerSelectionInvestigationRoute } from './selection_investigation/route';
 import type { ConfigSchema } from './config';
 import { appLocatorGetLocationCommon } from '../common/app_locator_get_location';
 import {
@@ -53,7 +55,7 @@ export class DiscoverServerPlugin
   }
 
   public setup(
-    core: CoreSetup,
+    core: CoreSetup<DiscoverServerPluginStartDeps>,
     plugins: {
       agentBuilder?: AgentBuilderPluginSetup;
       data: DataPluginSetup;
@@ -71,6 +73,11 @@ export class DiscoverServerPlugin
       this.logger,
       plugins.usageCollection?.createUsageCounter('discover_sessions_api')
     );
+    registerSelectionInvestigationRoute({
+      router: core.http.createRouter(),
+      getStartServices: core.getStartServices,
+      logger: this.logger.get('selection-investigation'),
+    });
 
     if (plugins.home) {
       registerSampleData(plugins.home.sampleData);
@@ -99,6 +106,7 @@ export class DiscoverServerPlugin
     if (plugins.agentBuilder) {
       registerAttachments(plugins.agentBuilder);
       registerSkill(plugins.agentBuilder);
+      plugins.agentBuilder.tools.register(createGuardedEsqlTool());
     }
 
     core.pricing.registerProductFeatures([
