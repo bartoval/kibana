@@ -12,7 +12,7 @@ import { createReasoningEvent } from '@kbn/agent-builder-genai-utils/langchain';
 import { wrapJsonSchema } from '@kbn/agent-builder-genai-utils/tools/utils/json_schema';
 import type { Logger } from '@kbn/logging';
 import { convertError, isRecoverableError } from './utils/errors';
-import { errorAction } from './actions';
+import { errorAction, isAgentErrorAction } from './actions';
 import type { PromptFactory } from './prompts';
 import { getRandomAnsweringMessage } from './i18n';
 import { tags } from './constants';
@@ -45,6 +45,7 @@ export const createAnswerAgentStructured = ({
   promptFactory,
   events,
   outputSchema,
+  logger,
 }: {
   chatModel: InferenceChatModel;
   events: AgentEventEmitter;
@@ -56,6 +57,10 @@ export const createAnswerAgentStructured = ({
     if (state.answerActions.length === 0 && state.errorCount === 0) {
       events.emit(createReasoningEvent(getRandomAnsweringMessage(), { transient: true }));
     }
+    const invokeStartedAt = Date.now();
+    logger.info(
+      `[answer-agent-structured] structured output invoke starting priorErrorCount=${state.errorCount} priorAnswerActionCount=${state.answerActions.length}`
+    );
     try {
       const { schema: schemaToUse, wrapped } = wrapJsonSchema({
         schema: outputSchema ?? structuredOutputSchema,
@@ -86,12 +91,37 @@ export const createAnswerAgentStructured = ({
 
       const action = processStructuredAnswerResponse(response);
 
+      if (isAgentErrorAction(action)) {
+        logger.warn(
+          `[answer-agent-structured] structured response rejected for retry invokeMs=${
+            Date.now() - invokeStartedAt
+          } errCode=${action.error.meta.errCode} agentErrorCount=${state.errorCount} message=${
+            action.error.message
+          }`
+        );
+      } else {
+        logger.info(
+          `[answer-agent-structured] structured output invoke succeeded invokeMs=${
+            Date.now() - invokeStartedAt
+          }`
+        );
+      }
+
       return {
         answerActions: [action],
         errorCount: 0,
       };
     } catch (error) {
       const executionError = convertError(error);
+      logger.warn(
+        `[answer-agent-structured] structured output invoke failed invokeMs=${
+          Date.now() - invokeStartedAt
+        } errCode=${executionError.meta.errCode} recoverable=${isRecoverableError(
+          executionError
+        )} nextErrorCount=${
+          isRecoverableError(executionError) ? state.errorCount + 1 : state.errorCount
+        } message=${executionError.message}`
+      );
       if (isRecoverableError(executionError)) {
         return {
           answerActions: [errorAction(executionError)],

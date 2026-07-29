@@ -146,6 +146,14 @@ export class EvidenceLedger {
   }
 
   // A one-value breakdown that repeats an existing total did not narrow the investigation.
+  /** Compact snapshot for investigation debug logs (evidence ids produced this run). */
+  public listEvidenceReferences(): Array<{ evidenceId: string; evidenceRowIds: string[] }> {
+    return [...this.records.values()].map((record) => ({
+      evidenceId: record.evidenceId,
+      evidenceRowIds: record.rows.map(({ evidenceRowId }) => evidenceRowId),
+    }));
+  }
+
   public isNonDiscriminating(record: EvidenceRecord): boolean {
     if (!record.keyColumn || record.rows.length !== 1) {
       return false;

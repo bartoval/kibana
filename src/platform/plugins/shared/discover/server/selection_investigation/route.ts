@@ -26,6 +26,7 @@ import { InvestigationExecutionPolicy, registerInvestigationPolicy } from './pol
 import { resolveInvestigationProfile } from './profile';
 import { InvestigationError, isInvestigationError } from './errors';
 import { EvidenceLedger } from './evidence';
+import { createInvestigationLogger } from './investigation_debug_log';
 
 const calculateRanges = (selection: {
   from: string;
@@ -136,6 +137,13 @@ export const registerSelectionInvestigationRoute = ({
         const output$ = new ReplaySubject<ServerSentEvent>(32);
         const executionId = uuidv4();
         const runId = executionId;
+        const runWallStartedAt = Date.now();
+        const runLog = createInvestigationLogger(logger, runId, normalizedBody.requestId);
+        runLog.info('Investigation HTTP stream opened', {
+          executionId,
+          timeoutMs: INVESTIGATION_RUN_TIMEOUT_MS,
+          goalPreview: normalizedBody.goal.slice(0, 120),
+        });
         const ledger = new EvidenceLedger(runId, ranges.selection, ranges.baseline);
         const profile = await resolveInvestigationProfile({
           esClient: coreContext.elasticsearch.client,
@@ -151,6 +159,20 @@ export const registerSelectionInvestigationRoute = ({
           ledger,
           signal: executionAbortController.signal,
           onPhase: (step, status) => {
+            runLog.debug('Investigation phase event', {
+              stepId: step.stepId,
+              phase: step.phase,
+              status,
+              wave: step.wave,
+              label: step.label,
+              elapsedRunMs: Date.now() - runWallStartedAt,
+              ...(step.result
+                ? {
+                    rowCount: step.result.rowCount,
+                    esqlExecutionMs: step.result.esqlExecutionMs,
+                  }
+                : {}),
+            });
             if (!output$.closed) {
               output$.next(toSseEvent({ type: 'phase', data: { ...step, status } }));
             }
@@ -161,6 +183,12 @@ export const registerSelectionInvestigationRoute = ({
         // Disconnect and timeout close the transport immediately. The policy stays registered until
         // Agent Builder settles, so a late tool call is still denied by the request-scoped hook.
         runTimeout = setTimeout(() => {
+          runLog.warn('Investigation run timeout reached; aborting agent execution', {
+            executionId,
+            elapsedRunMs: Date.now() - runWallStartedAt,
+            timeoutMs: INVESTIGATION_RUN_TIMEOUT_MS,
+            ledgerEvidence: ledger.listEvidenceReferences(),
+          });
           executionAbortController.abort('timeout');
           if (!output$.closed) {
             output$.next(toSseEvent({ type: 'aborted', data: { reason: 'timeout' } }));
@@ -170,6 +198,10 @@ export const registerSelectionInvestigationRoute = ({
           releaseTransportOnce();
         }, INVESTIGATION_RUN_TIMEOUT_MS);
         requestAbortSubscription = request.events.aborted$.subscribe(() => {
+          runLog.warn('Investigation HTTP client disconnected', {
+            executionId,
+            elapsedRunMs: Date.now() - runWallStartedAt,
+          });
           executionAbortController.abort('client');
           responseAbortController.abort('client');
           output$.complete();
@@ -198,7 +230,13 @@ export const registerSelectionInvestigationRoute = ({
           executionAbortController,
           output$,
           logger,
-          onSettled: releaseOnce,
+          onSettled: () => {
+            runLog.info('Investigation settled (policy and transport released)', {
+              executionId,
+              elapsedRunMs: Date.now() - runWallStartedAt,
+            });
+            releaseOnce();
+          },
         });
 
         return response.ok({
