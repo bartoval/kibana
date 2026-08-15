@@ -46,7 +46,7 @@ export async function handleListOperator(ctx: ExpressionContext): Promise<ISugge
   const allowSubqueryOperand = ctx.options.allowSubquery === true;
 
   // No list yet: suggest opening parenthesis
-  if (shouldSuggestRightOperandStart(rightOperand)) {
+  if (shouldSuggestRightOperandStart(rightOperand, innerText.length)) {
     if (allowSubqueryOperand) {
       return [
         listCompleteItem,

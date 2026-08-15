@@ -18,34 +18,27 @@ import type { PartialOperatorDetection } from '../../types';
 import {
   endsWithInOrNotInToken,
   endsWithIsOrIsNotToken,
-  endsWithLikeOrRlikeToken,
-  LIKE_OPERATOR_REGEX,
   NOT_IN_REGEX,
   IS_NOT_REGEX,
 } from '../utils';
-import { endsWithOpenParen, normalizeWhitespace } from '../../../../regex';
+import { endsWithOpenParen } from '../../../../regex';
 
-// Regex to extract field name before operator: match[1] = fieldName
-// Matches with or without opening parenthesis
 const FIELD_BEFORE_IN_REGEX = /([\w.]+)\s+(?:not\s+)?in\s*\(?\s*$/i;
-const FIELD_BEFORE_LIKE_REGEX = /([\w.]+)\s+(?:not\s+)?(?:r)?like\s*\(?\s*$/i;
 
 /**
- * Creates a synthetic infix operator node (IN, LIKE, RLIKE, etc.).
- * Used when cursor is right after operator: "field IN ", "field IN(", "field LIKE ".
- * If innerText ends with "(", creates a list node instead of placeholder.
+ * Creates a synthetic IN / NOT IN node when the parser has not produced one.
+ * If innerText ends with "(", creates a list node instead of a placeholder.
  */
-function createSyntheticInfixOperatorNode(
+export function createSyntheticListOperatorNode(
   operatorName: string,
   innerText: string,
-  fieldPattern: RegExp,
   leftOperand?: ESQLSingleAstItem
 ): ESQLFunction {
   const textLength = innerText.length;
   const hasOpenParen = endsWithOpenParen(innerText);
 
   const right = hasOpenParen ? createEmptyListNode(textLength) : createPlaceholderNode(textLength);
-  const left = leftOperand ?? extractFieldFromText(innerText, fieldPattern);
+  const left = leftOperand ?? extractFieldFromText(innerText);
 
   return {
     type: 'function',
@@ -56,32 +49,6 @@ function createSyntheticInfixOperatorNode(
     location: { min: textLength, max: textLength },
     text: operatorName,
   };
-}
-
-export function createSyntheticListOperatorNode(
-  operatorName: string,
-  innerText: string,
-  leftOperand?: ESQLSingleAstItem
-): ESQLFunction {
-  return createSyntheticInfixOperatorNode(
-    operatorName,
-    innerText,
-    FIELD_BEFORE_IN_REGEX,
-    leftOperand
-  );
-}
-
-export function createSyntheticLikeOperatorNode(
-  operatorName: string,
-  innerText: string,
-  leftOperand?: ESQLSingleAstItem
-): ESQLFunction {
-  return createSyntheticInfixOperatorNode(
-    operatorName,
-    innerText,
-    FIELD_BEFORE_LIKE_REGEX,
-    leftOperand
-  );
 }
 
 function createPlaceholderNode(textLength: number): ESQLUnknownItem {
@@ -101,8 +68,8 @@ function createEmptyListNode(textLength: number): ESQLList {
   );
 }
 
-function extractFieldFromText(innerText: string, pattern: RegExp): ESQLSingleAstItem | undefined {
-  const match = innerText.match(pattern);
+function extractFieldFromText(innerText: string): ESQLSingleAstItem | undefined {
+  const match = innerText.match(FIELD_BEFORE_IN_REGEX);
 
   if (match?.[1]) {
     return Builder.expression.column(match[1]);
@@ -120,7 +87,6 @@ export function detectNullCheck(innerText: string): PartialOperatorDetection | n
     return null;
   }
 
-  // Check if it contains NOT to determine which operator
   const containsNot = IS_NOT_REGEX.test(innerText);
 
   return {
@@ -130,35 +96,10 @@ export function detectNullCheck(innerText: string): PartialOperatorDetection | n
 }
 
 /**
- * Detects partial LIKE / RLIKE / NOT LIKE / NOT RLIKE operators.
- * Examples: "field LIKE ", "field RLIKE ", "field NOT LIKE ", "field NOT RLIKE "
- */
-export function detectLike(innerText: string): PartialOperatorDetection | null {
-  if (!endsWithLikeOrRlikeToken(innerText)) {
-    return null;
-  }
-
-  const match = innerText.match(LIKE_OPERATOR_REGEX);
-
-  if (!match) {
-    return null;
-  }
-
-  // Normalize: lowercase, trim, collapse multiple spaces
-  const operatorName = normalizeWhitespace(match[0].toLowerCase()).trim();
-
-  return {
-    operatorName,
-    textBeforeCursor: innerText,
-  };
-}
-
-/**
- * Detects partial IN / NOT IN operators.
+ * Detects partial IN / NOT IN operators when the AST may still be missing.
  * Examples: "field IN ", "field IN(", "field NOT IN ", "field NOT IN("
  */
 export function detectIn(innerText: string): PartialOperatorDetection | null {
-  // Don't clean the text - we want to preserve parentheses to NOT match them
   if (!endsWithInOrNotInToken(innerText)) {
     return null;
   }

@@ -13,7 +13,6 @@ import { getOperatorSuggestion } from '../../../operators';
 import type { ISuggestionItem } from '../../../../../registry/types';
 import { logicalOperators } from '../../../../all_operators';
 
-export const LIKE_OPERATOR_REGEX = /\b(not\s+)?(r?like)\s*$/i;
 export const IS_NOT_REGEX = /\bis\s+not\b/i;
 export const IS_NULL_OPERATOR_REGEX =
   /\bis\s+(?:n(?:o(?:t(?:\s+n(?:u(?:l)?)?|\s*)?)?|u(?:l)?)?)?$/i;
@@ -22,10 +21,6 @@ export const NOT_IN_REGEX = /\bnot\s+in\s*\(?\s*\/?\s*$/i;
 
 export function endsWithInOrNotInToken(innerText: string): boolean {
   return IN_OPERATOR_REGEX.test(innerText);
-}
-
-export function endsWithLikeOrRlikeToken(innerText: string): boolean {
-  return LIKE_OPERATOR_REGEX.test(innerText);
 }
 
 export function endsWithIsOrIsNotToken(innerText: string): boolean {
@@ -37,11 +32,20 @@ export function isOperandMissing(operand: ESQLSingleAstItem | undefined): boolea
 }
 
 /** Returns true when the IN-family right operand can still be started. */
-export function shouldSuggestRightOperandStart(operand: ESQLSingleAstItem | undefined): boolean {
-  return (
-    isOperandMissing(operand) ||
-    (isList(operand) && operand.location.min === 0 && operand.location.max === 0)
-  );
+export function shouldSuggestRightOperandStart(
+  operand: ESQLSingleAstItem | undefined,
+  cursorOffset: number
+): boolean {
+  if (isOperandMissing(operand)) {
+    return true;
+  }
+
+  if (!isList(operand)) {
+    return false;
+  }
+
+  // Empty list created only by syntax correction after the cursor (spans the injected "(marker)").
+  return operand.location.min >= cursorOffset && operand.location.max > operand.location.min;
 }
 
 /** Suggestions for logical continuations after a complete boolean operator expression. */

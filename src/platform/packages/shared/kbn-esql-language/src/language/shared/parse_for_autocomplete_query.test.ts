@@ -121,4 +121,22 @@ describe('getAutocompleteCursorContext', () => {
     expect(subquery).toBeDefined();
     assertNoMarker(root, query, 'root');
   });
+
+  it.each([
+    ['WHERE IN without parenthesis', 'FROM index | WHERE keywordField IN '],
+    ['WHERE NOT IN without parenthesis', 'FROM index | WHERE keywordField NOT IN '],
+    ['IN inside COALESCE', 'FROM index | EVAL x = COALESCE(keywordField IN '],
+    ['EVAL IN without assignment', 'from index | EVAL doubleField in '],
+  ])('preserves the IN operator node for %s', (_, query) => {
+    const { root } = parseAutocompleteQuery(query, query.length);
+    const inExpression = Walker.find(
+      root,
+      (node) =>
+        isFunctionExpression(node) &&
+        (node.name.toLowerCase() === 'in' || node.name.toLowerCase() === 'not in')
+    );
+
+    expect(inExpression).toBeDefined();
+    assertNoMarker(root, query, 'root');
+  });
 });

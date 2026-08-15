@@ -9,7 +9,7 @@
 
 import type { ISuggestionItem } from '../../../../../../registry/types';
 import type { ExpressionContext, PartialOperatorDetection } from '../../types';
-import { handleNullCheckOperator, handleLikeOperator, handleInOperator } from './handlers';
+import { handleNullCheckOperator, handleInOperator } from './handlers';
 
 type PartialOperatorHandler = (
   detection: PartialOperatorDetection,
@@ -19,10 +19,6 @@ type PartialOperatorHandler = (
 const PARTIAL_OPERATOR_HANDLERS: Record<string, PartialOperatorHandler> = {
   in: handleInOperator,
   'not in': handleInOperator,
-  like: handleLikeOperator,
-  rlike: handleLikeOperator,
-  'not like': handleLikeOperator,
-  'not rlike': handleLikeOperator,
   'is null': handleNullCheckOperator,
   'is not null': handleNullCheckOperator,
 };

@@ -11,10 +11,10 @@ import { isFunctionExpression, within } from '@elastic/esql';
 import { getExpressionType, getFunctionDefinition } from '../..';
 import { buildMapValueCompleteItem } from '../../../../registry/complete_items';
 import type { ISuggestionItem } from '../../../../registry/types';
-import { inOperators, nullCheckOperators, patternMatchOperators } from '../../../all_operators';
+import { inOperators, nullCheckOperators } from '../../../all_operators';
 import { isExpressionComplete } from '../../expressions';
 import { dispatchPartialOperators } from './operators/partial/dispatcher';
-import { detectIn, detectLike, detectNullCheck } from './operators/partial/utils';
+import { detectIn, detectNullCheck } from './operators/partial/utils';
 import { getPosition, type ExpressionPosition } from './position';
 import { dispatchStates } from './positions/dispatcher';
 import type { MapParameters } from '../map_expression';
@@ -77,14 +77,15 @@ export async function suggestForExpression(
 }
 
 /**
- * Handles IN/NOT IN, LIKE/RLIKE, and IS/IS NOT operators.
+ * Handles incomplete IS/IS NOT NULL operators from the source text, and IN/NOT IN
+ * when the parser still has not produced an operator node.
+ *
+ * LIKE/RLIKE, and IN when `correctQuerySyntax` already produced a real AST node,
+ * go through the normal after-operator flow.
  *
  * Use cases:
- * 1. Partial operator typing: "field IS ", "field IS N", "field LIKE "
- * 2. Complete operator without AST: "CASE(field IN(" - operator complete but no AST node
- *
- * - If valid AST node exists: uses it directly (preserves parser information)
- * - If AST missing/incomplete: creates synthetic node or suggests directly
+ * 1. Partial null-check typing: "field IS ", "field IS N" - prefix-match IS NULL / IS NOT NULL
+ * 2. IN without an AST node: nested commas like CASE(..., field IN (, or a collapsed parse
  *
  * Skips when AST has a complete operator node - normal flow handles it.
  */
@@ -93,26 +94,25 @@ async function trySuggestForPartialOperators(
 ): Promise<ISuggestionItem[] | null> {
   const { innerText, expressionRoot } = ctx;
 
-  const detection = detectNullCheck(innerText) || detectLike(innerText) || detectIn(innerText);
+  const detection = detectNullCheck(innerText) || detectIn(innerText);
 
   if (!detection) {
     return null;
   }
 
-  // If we have an AST operator node, check if it's complete
   if (expressionRoot?.type === 'function') {
     const astOperatorName = expressionRoot.name?.toLowerCase();
     const isIncomplete = expressionRoot.incomplete;
 
-    // Build list of all operator names that we handle in the partial system
     const managedPartialOperators = [
       ...nullCheckOperators.map((op) => op.name),
       ...inOperators.map((op) => op.name),
-      ...patternMatchOperators.map((op) => op.name),
     ];
 
-    // If AST has a complete operator node (not incomplete), let normal flow handle it
-    if (managedPartialOperators.includes(astOperatorName) && !isIncomplete) {
+    // Real IN/NOT IN nodes (including those recovered by syntax correction) use the AST.
+    // Incomplete null-checks still need prefix matching ("IS N").
+    const isInOperatorNode = inOperators.some((op) => op.name === astOperatorName);
+    if (isInOperatorNode || (managedPartialOperators.includes(astOperatorName) && !isIncomplete)) {
       return null;
     }
   }

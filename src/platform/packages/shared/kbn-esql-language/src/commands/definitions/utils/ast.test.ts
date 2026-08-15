@@ -7,7 +7,7 @@
  * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
-import { Parser, PromQLParser, Walker } from '@elastic/esql';
+import { isFunctionExpression, Parser, PromQLParser, Walker } from '@elastic/esql';
 import type { ESQLAstItem, ESQLAstQueryExpression } from '@elastic/esql/types';
 import { EDITOR_MARKER } from '../constants';
 import {
@@ -95,6 +95,25 @@ describe('correctQuerySyntax', () => {
     const query = 'FROM index | EVAL SCORE(ABS(bytes) : ';
 
     expect(correctQuerySyntax(query)).toBe(`${query}"${EDITOR_MARKER}")`);
+  });
+
+  it('uses a list marker for an incomplete IN expression', () => {
+    const query = 'FROM index | WHERE keywordField IN ';
+
+    expect(correctQuerySyntax(query)).toBe(`${query}(${EDITOR_MARKER})`);
+  });
+
+  it('uses a list marker for an incomplete NOT IN expression', () => {
+    const query = 'FROM index | WHERE keywordField NOT IN ';
+
+    expect(correctQuerySyntax(query)).toBe(`${query}(${EDITOR_MARKER})`);
+  });
+
+  it('does not inject an IN list marker when the parenthesis is already open', () => {
+    const query = 'FROM index | WHERE keywordField IN (';
+
+    expect(correctQuerySyntax(query)).toBe(`${query})`);
+    expect(correctQuerySyntax(query)).not.toContain(EDITOR_MARKER);
   });
 });
 
@@ -200,5 +219,22 @@ describe('removeAutocompleteMarkers', () => {
     // Before cleaning, the marker leaks into inlineCast.castType (a plain string property).
     expect(JSON.stringify(root)).toContain(EDITOR_MARKER);
     expect(JSON.stringify(removeAutocompleteMarkers(root))).not.toContain(EDITOR_MARKER);
+  });
+
+  it('parses incomplete IN as an operator node', () => {
+    const innerText = 'FROM index | WHERE keywordField IN ';
+    const root = parseAutocomplete(innerText);
+    const normalizedRoot = removeAutocompleteMarkers(root);
+    const inExpression = Walker.find(
+      normalizedRoot,
+      (node) => isFunctionExpression(node) && node.name === 'in'
+    );
+
+    expect(countMarkers(root)).toBeGreaterThan(0);
+    expect(inExpression).toMatchObject({
+      type: 'function',
+      name: 'in',
+    });
+    expect(inExpression?.args[0]).toMatchObject({ type: 'column', name: 'keywordField' });
   });
 });

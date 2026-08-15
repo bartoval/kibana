@@ -7,13 +7,11 @@
  * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
-import type { ESQLSingleAstItem, ESQLFunction } from '@elastic/esql/types';
 import type { ISuggestionItem } from '../../../../../../registry/types';
 import type { ExpressionContext, PartialOperatorDetection } from '../../types';
 import { getFunctionDefinition } from '../../../../functions';
-import { createSyntheticListOperatorNode, createSyntheticLikeOperatorNode } from './utils';
+import { createSyntheticListOperatorNode } from './utils';
 import { dispatchOperators } from '../dispatcher';
-import { inOperators, patternMatchOperators } from '../../../../../all_operators';
 import { normalizeWhitespace } from '../../../../regex';
 
 const NULL_CHECK_CANDIDATES = ['is null', 'is not null'] as const;
@@ -57,59 +55,19 @@ export async function handleNullCheckOperator(
   return suggestions.length > 0 ? suggestions : null;
 }
 
-export async function handleLikeOperator(
-  detection: PartialOperatorDetection,
-  context: ExpressionContext
-): Promise<ISuggestionItem[] | null> {
-  return handleInfixOperator(
-    detection,
-    context,
-    patternMatchOperators.map((op) => op.name),
-    createSyntheticLikeOperatorNode
-  );
-}
-
-export async function handleInOperator(
-  detection: PartialOperatorDetection,
-  context: ExpressionContext
-): Promise<ISuggestionItem[] | null> {
-  return handleInfixOperator(
-    detection,
-    context,
-    inOperators.map((op) => op.name),
-    createSyntheticListOperatorNode
-  );
-}
-
 /**
- * Handles infix operators with content (IN, LIKE, RLIKE, etc.).
- * Uses existing AST node if available, otherwise creates synthetic node.
+ * Handles IN / NOT IN when the parser has not produced an operator node
+ * (e.g. nested commas in CASE, or a collapsed expression).
  */
-async function handleInfixOperator(
+export async function handleInOperator(
   { operatorName, textBeforeCursor }: PartialOperatorDetection,
-  context: ExpressionContext,
-  operatorNames: string[],
-  createSyntheticNode: (
-    operatorName: string,
-    text: string,
-    expressionRoot?: ESQLSingleAstItem
-  ) => ESQLFunction
+  context: ExpressionContext
 ): Promise<ISuggestionItem[] | null> {
-  const { innerText, expressionRoot } = context;
-  const text = textBeforeCursor || innerText;
+  const text = textBeforeCursor || context.innerText;
+  const leftOperand =
+    context.expressionRoot?.type === 'column' ? context.expressionRoot : undefined;
 
-  const hasValidAstNode =
-    expressionRoot?.type === 'function' &&
-    operatorNames.includes(expressionRoot.name?.toLowerCase() ?? '');
-
-  if (hasValidAstNode) {
-    return dispatchOperators({ ...context, innerText: text });
-  }
-
-  const leftOperand = expressionRoot?.type === 'column' ? expressionRoot : undefined;
-  const syntheticNode = createSyntheticNode(operatorName, text, leftOperand);
-
-  context.expressionRoot = syntheticNode;
+  context.expressionRoot = createSyntheticListOperatorNode(operatorName, text, leftOperand);
   context.innerText = text;
 
   return dispatchOperators(context);

@@ -10,6 +10,7 @@
 import {
   isBinaryExpression,
   isFunctionExpression,
+  isList,
   isLiteral,
   isUnaryExpression,
 } from '@elastic/esql';
@@ -207,6 +208,14 @@ export function getIncompleteOperatorReason(
   const rightOperand = getBinaryExpressionOperand(operator, 'right');
 
   if (isInOperator(fnDefinition.name) && Array.isArray(rightOperand) && !rightOperand.length) {
+    return 'tooFewArgs';
+  }
+
+  if (
+    isInOperator(fnDefinition.name) &&
+    isList(rightOperand) &&
+    (!rightOperand.values || rightOperand.values.length === 0)
+  ) {
     return 'tooFewArgs';
   }
 
