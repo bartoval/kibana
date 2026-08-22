@@ -21,7 +21,7 @@ import type {
 } from './types';
 
 export function getTransformIn(transformDrilldownsIn: DrilldownTransforms['transformIn']) {
-  return function transformIn(apiState: SearchEmbeddablePanelApiState): {
+  return function transformIn(apiState: SearchEmbeddablePanelApiState | SearchEmbeddableState): {
     state: StoredSearchEmbeddableState;
     references: SavedObjectReference[];
   } {

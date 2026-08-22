@@ -16,6 +16,7 @@ import type {
   EditableSavedSearchAttributes,
   SearchEmbeddableByReferenceState,
   SearchEmbeddablePanelApiState,
+  SearchEmbeddableState,
   StoredSearchEmbeddableByValueState,
 } from '../../../common/embeddable/types';
 import {
@@ -33,11 +34,13 @@ import { EDITABLE_PANEL_KEYS } from '../constants';
 import type { SearchEmbeddableInputState, SearchEmbeddableRuntimeState } from '../types';
 import { isTabDeleted } from './is_tab_deleted';
 
+type SearchEmbeddableDeserializableState = SearchEmbeddableInputState | SearchEmbeddableState;
+
 export const deserializeState = async ({
   serializedState,
   discoverServices,
 }: {
-  serializedState: SearchEmbeddableInputState;
+  serializedState: SearchEmbeddableDeserializableState;
   discoverServices: DiscoverServices;
 }): Promise<SearchEmbeddableRuntimeState> => {
   const panelState = pick(serializedState, EDITABLE_PANEL_KEYS);

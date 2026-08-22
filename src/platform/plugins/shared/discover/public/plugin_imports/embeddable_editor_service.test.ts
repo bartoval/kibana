@@ -8,7 +8,8 @@
  */
 
 import { SEARCH_EMBEDDABLE_TYPE } from '@kbn/discover-utils';
-import type { SavedSearchByValueAttributes } from '@kbn/saved-search-plugin/common';
+import { VIEW_MODE } from '@kbn/saved-search-plugin/common';
+import { AS_CODE_DATA_VIEW_REFERENCE_TYPE } from '@kbn/as-code-data-views-schema';
 import { coreMock } from '@kbn/core/public/mocks';
 import { ESQL_CONTROL } from '@kbn/controls-constants';
 import type { OptionsListESQLControlState } from '@kbn/controls-schemas';
@@ -17,6 +18,7 @@ import type { EmbeddableEditorState, EmbeddableStateTransfer } from '@kbn/embedd
 import { embeddablePluginMock } from '@kbn/embeddable-plugin/public/mocks';
 import { EmbeddableEditorService, TransferAction } from './embeddable_editor_service';
 import { mockControlState } from '../__mocks__/esql_controls';
+import type { DiscoverSessionEmbeddableByValueState } from '../../server';
 
 describe('EmbeddableEditorService', () => {
   const createApplication = ({
@@ -70,20 +72,20 @@ describe('EmbeddableEditorService', () => {
   });
 
   const createByValueState = (
-    overrides: Partial<SavedSearchByValueAttributes> = {}
-  ): SavedSearchByValueAttributes => ({
+    overrides: Partial<DiscoverSessionEmbeddableByValueState> = {}
+  ): DiscoverSessionEmbeddableByValueState => ({
     title: 'Saved search',
-    sort: [],
-    columns: [],
-    description: '',
-    grid: {},
-    hideChart: false,
-    hideTable: false,
-    isTextBasedQuery: false,
-    kibanaSavedObjectMeta: {
-      searchSourceJSON: '{}',
-    },
-    tabs: [],
+    tabs: [
+      {
+        sort: [],
+        filters: [],
+        data_source: {
+          type: AS_CODE_DATA_VIEW_REFERENCE_TYPE,
+          ref_id: 'data-view-1',
+        },
+        view_mode: VIEW_MODE.DOCUMENT_LEVEL,
+      },
+    ],
     ...overrides,
   });
 
@@ -224,9 +226,7 @@ describe('EmbeddableEditorService', () => {
           },
           {
             type: SEARCH_EMBEDDABLE_TYPE,
-            serializedState: {
-              attributes: byValueState,
-            },
+            serializedState: byValueState,
             embeddableId: 'panel-42',
           },
         ],
@@ -309,9 +309,7 @@ describe('EmbeddableEditorService', () => {
           },
           {
             type: SEARCH_EMBEDDABLE_TYPE,
-            serializedState: {
-              attributes: byValueState,
-            },
+            serializedState: byValueState,
             embeddableId: 'panel-42',
           },
         ],
@@ -326,7 +324,8 @@ describe('EmbeddableEditorService', () => {
       app: 'dashboard',
       path: '/app/dashboards#/create',
       state: {
-        savedObjectId: 'saved-search-1',
+        ref_id: 'saved-search-1',
+        overrides: {},
       },
     });
 

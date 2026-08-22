@@ -39,7 +39,7 @@ export function isSearchEmbeddableByValueState(
 }
 
 export function isSearchEmbeddableLegacyPanelState(
-  state: SearchEmbeddablePanelApiState
+  state: SearchEmbeddablePanelApiState | SearchEmbeddableState
 ): state is SearchEmbeddableState {
   return 'savedObjectId' in state || isSearchEmbeddableByValueState(state);
 }

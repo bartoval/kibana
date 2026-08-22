@@ -14,9 +14,10 @@ import { EmbeddableRenderer } from '@kbn/embeddable-plugin/public';
 import { SEARCH_EMBEDDABLE_TYPE, getDefaultSort } from '@kbn/discover-utils';
 import {
   type SearchEmbeddableApi,
+  type SearchEmbeddableInputState,
   type SearchEmbeddablePanelApiState,
 } from '@kbn/discover-plugin/public';
-import type { SearchEmbeddableState } from '@kbn/discover-plugin/common';
+import { fromStoredTab } from '@kbn/discover-plugin/common';
 import { css } from '@emotion/react';
 import { type SavedSearch, toSavedSearchAttributes } from '@kbn/saved-search-plugin/common';
 import { isOfAggregateQueryType } from '@kbn/es-query';
@@ -28,7 +29,8 @@ const TIMESTAMP_FIELD = '@timestamp';
 export const SavedSearchComponent: React.FC<SavedSearchComponentProps> = (props) => {
   // Creates our *initial* search source and set of attributes.
   // Future changes to these properties will be facilitated by the Parent API from the embeddable.
-  const [initialSerializedState, setInitialSerializedState] = useState<SearchEmbeddableState>();
+  const [initialSerializedState, setInitialSerializedState] =
+    useState<SearchEmbeddableInputState>();
 
   const [error, setError] = useState<Error | undefined>();
 
@@ -76,7 +78,6 @@ export const SavedSearchComponent: React.FC<SavedSearchComponentProps> = (props)
           searchSource.setField('index', dataView);
           searchSource.setField('query', query);
           searchSource.setField('filter', filters);
-          searchSource.setField('nonHighlightingFilters', nonHighlightingFilters);
           const { searchSourceJSON, references } = searchSource.serialize();
           // By-value saved object structure
           const savedSearch: SavedSearch = {
@@ -94,10 +95,12 @@ export const SavedSearchComponent: React.FC<SavedSearchComponentProps> = (props)
             managed: false,
           };
           setInitialSerializedState({
-            attributes: {
-              ...toSavedSearchAttributes(savedSearch, searchSourceJSON),
-              references,
-            },
+            tabs: [
+              fromStoredTab(
+                toSavedSearchAttributes(savedSearch, searchSourceJSON).tabs[0].attributes,
+                references
+              ),
+            ],
             time_range: timeRange,
             nonPersistedDisplayOptions: {
               solutionNavIdOverride,
@@ -116,8 +119,8 @@ export const SavedSearchComponent: React.FC<SavedSearchComponentProps> = (props)
     return () => {
       abortController.abort();
     };
-    // columns is synced after mount via syncColumns; omitting it here avoids remounting
-    // the embeddable when columns change.
+    // columns and nonHighlightingFilters are synced after mount; omitting them here
+    // avoids remounting the embeddable when they change.
   }, [
     sort,
     grid,
@@ -127,7 +130,6 @@ export const SavedSearchComponent: React.FC<SavedSearchComponentProps> = (props)
     dataViews,
     documentViewerEnabled,
     filters,
-    nonHighlightingFilters,
     filtersEnabled,
     index,
     query,
@@ -157,7 +159,7 @@ export const SavedSearchComponent: React.FC<SavedSearchComponentProps> = (props)
 
 const SavedSearchComponentTable: React.FC<
   SavedSearchComponentProps & {
-    initialSerializedState: SearchEmbeddableState;
+    initialSerializedState: SearchEmbeddableInputState;
   }
 > = (props) => {
   const {
@@ -175,6 +177,10 @@ const SavedSearchComponentTable: React.FC<
   } = props;
   const embeddableApi = useRef<SearchEmbeddableApi | undefined>(undefined);
   const [isEmbeddableApiAvailable, setIsEmbeddableApiAvailable] = useState(false);
+  // The API callback is captured while the embeddable builds asynchronously. Use a ref so
+  // the first fetch receives the latest non-highlighting filters.
+  const latestNonHighlightingFiltersRef = useRef(nonHighlightingFilters);
+  latestNonHighlightingFiltersRef.current = nonHighlightingFilters;
 
   const { executionContext } = props;
   const parentApi = useMemo(() => {
@@ -328,6 +334,9 @@ const SavedSearchComponentTable: React.FC<
       type={SEARCH_EMBEDDABLE_TYPE}
       getParentApi={() => parentApi}
       onApiAvailable={(api) => {
+        api.savedSearch$
+          .getValue()
+          .searchSource.setField('nonHighlightingFilters', latestNonHighlightingFiltersRef.current);
         embeddableApi.current = api;
         setIsEmbeddableApiAvailable(true);
       }}

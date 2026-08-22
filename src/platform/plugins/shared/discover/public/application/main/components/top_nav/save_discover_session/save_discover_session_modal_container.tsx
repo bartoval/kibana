@@ -134,7 +134,8 @@ export const DiscoverSessionSaveModalContainer = ({
           path: props.dashboardId === 'new' ? '#/create' : `#/view/${props.dashboardId}`,
           newPanel: isEmbeddedEditor && userWantsCopy,
           state: {
-            savedObjectId: response.discoverSession.id,
+            ref_id: response.discoverSession.id,
+            overrides: {},
           },
         });
         return;

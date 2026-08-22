@@ -10,6 +10,7 @@
 import { AS_CODE_DATA_VIEW_REFERENCE_TYPE } from '@kbn/as-code-data-views-schema';
 import type { DrilldownTransforms } from '@kbn/embeddable-plugin/common';
 import { getSearchEmbeddableTransforms } from './search_embeddable_transforms';
+import { getTransformIn } from './get_transform_in';
 import type {
   SearchEmbeddableState,
   StoredSearchEmbeddableByValueState,
@@ -301,7 +302,7 @@ describe('searchEmbeddableTransforms', () => {
         title: 'Title',
         savedObjectId: 'session-1',
       };
-      const result = getSearchEmbeddableTransforms(mockDrilldownTransforms).transformIn!(apiState);
+      const result = getTransformIn(mockDrilldownTransforms.transformIn)(apiState);
       expect(mockDrilldownTransforms.transformIn).toHaveBeenCalledWith(apiState);
       expect(result.state).not.toHaveProperty('savedObjectId');
       expect(result.references).toContainEqual({

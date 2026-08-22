@@ -654,7 +654,7 @@ describe('DiscoverSessionSaveModalContainer', () => {
         app: 'dashboards',
         path: '#/view/dashboard-123',
         newPanel: false,
-        state: { savedObjectId: 'the-saved-search-id' },
+        state: { ref_id: 'the-saved-search-id', overrides: {} },
       });
     });
 
@@ -674,7 +674,7 @@ describe('DiscoverSessionSaveModalContainer', () => {
         app: 'dashboards',
         path: '#/create',
         newPanel: false,
-        state: { savedObjectId: 'the-saved-search-id' },
+        state: { ref_id: 'the-saved-search-id', overrides: {} },
       });
     });
 
@@ -697,7 +697,7 @@ describe('DiscoverSessionSaveModalContainer', () => {
         app: 'dashboards',
         path: '#/view/dashboard-123',
         newPanel: true,
-        state: { savedObjectId: 'the-saved-search-id' },
+        state: { ref_id: 'the-saved-search-id', overrides: {} },
       });
     });
 
@@ -718,7 +718,7 @@ describe('DiscoverSessionSaveModalContainer', () => {
         app: 'dashboards',
         path: '#/create',
         newPanel: true,
-        state: { savedObjectId: 'the-saved-search-id' },
+        state: { ref_id: 'the-saved-search-id', overrides: {} },
       });
     });
 

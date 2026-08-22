@@ -10,7 +10,7 @@
 import { createDiscoverServicesMock } from '../../../../../__mocks__/services';
 import { getDiscoverInternalStateMock } from '../../../../../__mocks__/discover_state.mock';
 import { getTabStateMock, getPersistedTabMock } from '../__mocks__/internal_state.mocks';
-import { selectTabSavedSearch } from './saved_search';
+import { selectTabDiscoverSessionEmbeddableTab, selectTabSavedSearch } from './saved_search';
 import { createDiscoverSessionMock } from '@kbn/saved-search-plugin/common/mocks';
 import { dataViewWithTimefieldMock } from '../../../../../__mocks__/data_view_with_timefield';
 import { dataViewWithNoTimefieldMock } from '../../../../../__mocks__/data_view_no_timefield';
@@ -55,6 +55,26 @@ const setup = async () => {
 };
 
 describe('selectTabSavedSearch', () => {
+  it('creates a declarative embeddable tab for Dashboard transfer', async () => {
+    const { internalState, runtimeStateManager, services, getCurrentTab } = await setup();
+    const currentTab = getCurrentTab();
+
+    const tab = await selectTabDiscoverSessionEmbeddableTab({
+      tabId: currentTab.id,
+      getState: internalState.getState,
+      runtimeStateManager,
+      services,
+    });
+
+    expect(tab).toMatchObject({
+      column_order: ['message', 'extension'],
+      sort: [{ name: 'timestamp', direction: 'desc' }],
+      data_source: { type: 'data_view_reference', ref_id: dataViewWithTimefieldMock.id },
+    });
+    expect(tab).not.toHaveProperty('kibanaSavedObjectMeta');
+    expect(JSON.stringify(tab)).not.toContain('searchSourceJSON');
+  });
+
   it('creates a saved search from tab state with session metadata', async () => {
     const { internalState, runtimeStateManager, services, getCurrentTab } = await setup();
     const currentTab = getCurrentTab();

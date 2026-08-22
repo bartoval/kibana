@@ -46,7 +46,7 @@ export type SearchEmbeddableByReferenceState = SearchEmbeddableBaseState & {
 
 export type SearchEmbeddableState = SearchEmbeddableByValueState | SearchEmbeddableByReferenceState;
 
-export type SearchEmbeddablePanelApiState = DiscoverSessionEmbeddableState | SearchEmbeddableState;
+export type SearchEmbeddablePanelApiState = DiscoverSessionEmbeddableState;
 
 export type StoredSearchEmbeddableByValueState = SearchEmbeddableByValueState;
 

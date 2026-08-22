@@ -44,7 +44,7 @@ import {
 import { useProfileAccessor } from '../../../../context_awareness';
 import {
   internalStateActions,
-  selectTabSavedSearchByValueAttributes,
+  selectTabDiscoverSessionEmbeddableTab,
   useCurrentDataView,
   useCurrentTabSelector,
   useCurrentTabDataStateContainer,
@@ -123,7 +123,7 @@ export const useTopNavLinks = ({
       .map((ruleType) => ruleType.id);
 
   const transferBackToEditor = useCallback(async () => {
-    const byValueState = await selectTabSavedSearchByValueAttributes({
+    const tab = await selectTabDiscoverSessionEmbeddableTab({
       tabId: currentTab.id,
       getState,
       runtimeStateManager,
@@ -132,7 +132,7 @@ export const useTopNavLinks = ({
 
     services.embeddableEditor.transferBackToEditor(TransferAction.SaveByValue, {
       state: {
-        byValueState,
+        byValueState: { tabs: [tab] },
         controlGroupState: currentTab.attributes.controlGroupState,
       },
     });

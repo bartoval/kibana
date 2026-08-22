@@ -78,7 +78,7 @@ export {
   selectHasUnsavedChanges,
   searchSourceComparator,
   selectTabSavedSearch,
-  selectTabSavedSearchByValueAttributes,
+  selectTabDiscoverSessionEmbeddableTab,
 } from './selectors';
 
 export {

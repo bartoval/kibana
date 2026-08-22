@@ -167,7 +167,6 @@ export const getSearchEmbeddableFactory = ({
             ...titleComparators,
             ...timeRangeComparators,
             ...getDiscoverSessionEmbeddableComparators(isByValue, shouldSkipTabComparators),
-            nonPersistedDisplayOptions: 'skip',
           };
         },
         applySerializedState: async (nextState) => {

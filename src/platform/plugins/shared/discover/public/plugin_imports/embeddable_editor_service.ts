@@ -6,18 +6,18 @@
  * your election, the "Elastic License 2.0", the "GNU Affero General Public
  * License v3.0 only", or the "Server Side Public License, v 1".
  */
-import type {
-  DiscoverSessionTab,
-  SavedSearchByValueAttributes,
-} from '@kbn/saved-search-plugin/common';
+import type { DiscoverSessionTab } from '@kbn/saved-search-plugin/common';
 import { SEARCH_EMBEDDABLE_TYPE } from '@kbn/discover-utils';
 import type { EmbeddableEditorState, EmbeddableStateTransfer } from '@kbn/embeddable-plugin/public';
 import type { ApplicationStart } from '@kbn/core/public';
 import type { OptionsListESQLControlState } from '@kbn/controls-schemas';
 import type { ControlPanelState, ControlPanelsState } from '@kbn/control-group-renderer';
 import { ESQL_CONTROL } from '@kbn/controls-constants';
-import type { SearchEmbeddableByReferenceState } from '../../common/embeddable/types';
 import type { SearchEmbeddablePanelApiState } from '../embeddable/types';
+import type {
+  DiscoverSessionEmbeddableByReferenceState,
+  DiscoverSessionEmbeddableByValueState,
+} from '../../server';
 
 export interface DiscoverSessionByValueInput {
   discoverSessionTab: DiscoverSessionTab | undefined;
@@ -54,13 +54,13 @@ interface TransferOptionsBase {
 
 interface ByValueTransferOptions extends TransferOptionsBase {
   state: {
-    byValueState: SavedSearchByValueAttributes;
+    byValueState: DiscoverSessionEmbeddableByValueState;
     controlGroupState: ControlPanelsState<OptionsListESQLControlState> | undefined;
   };
 }
 
 interface ByReferenceTransferOptions extends TransferOptionsBase {
-  state: SearchEmbeddableByReferenceState;
+  state: DiscoverSessionEmbeddableByReferenceState;
 }
 
 type CombinedTransferOptions = ByValueTransferOptions | ByReferenceTransferOptions;
@@ -169,7 +169,7 @@ export class EmbeddableEditorService {
     if (action === TransferAction.SaveByValue) {
       const { state } = options as ByValueTransferOptions;
       return {
-        serializedState: { attributes: state.byValueState },
+        serializedState: state.byValueState,
         controlGroupState: reconcileControlGroupState({
           controlGroupState: state.controlGroupState ?? {},
           dashboardControlGroupState: this.getByValueInput().dashboardControlGroupState,
@@ -180,7 +180,7 @@ export class EmbeddableEditorService {
     if (action === TransferAction.SaveByReference) {
       const { state } = options as ByReferenceTransferOptions;
       return {
-        serializedState: { ref_id: state.savedObjectId, overrides: {} },
+        serializedState: state,
         controlGroupState: {},
       };
     }
