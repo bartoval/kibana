@@ -17,11 +17,18 @@ import {
   serializedTitlesSchema,
   serializedTimeRangeSchema,
 } from '@kbn/presentation-publishing-schemas';
-import { VIEW_MODE } from '@kbn/saved-search-plugin/common';
+import {
+  MAX_DISCOVER_SESSION_COLUMNS,
+  MAX_SAVED_SEARCH_SAMPLE_SIZE,
+  MIN_SAVED_SEARCH_SAMPLE_SIZE,
+  VIEW_MODE,
+} from '@kbn/saved-search-plugin/common';
 import { asCodeFilterSchema } from '@kbn/as-code-filters-schema';
 import { dataViewSchema } from '@kbn/as-code-data-views-schema';
 import type { GetDrilldownsSchemaFnType } from '@kbn/embeddable-plugin/server';
 import { ON_OPEN_PANEL_MENU } from '@kbn/ui-actions-plugin/common/trigger_ids';
+
+export const MAX_BREAKDOWN_FIELD_LENGTH = 1000;
 
 const columnSettingsEntrySchema = z
   .object({
@@ -61,10 +68,15 @@ export const dataTableLimitsSchema = z
       description:
         'The number of rows to display per page in the data table. If omitted, defaults to the advanced setting "discover:sampleRowsPerPage".',
     }),
-    sample_size: z.number().min(10).max(10000).optional().meta({
-      description:
-        'The number of documents to sample for the data table. If omitted, defaults to the advanced setting "discover:sampleSize".',
-    }),
+    sample_size: z
+      .number()
+      .min(MIN_SAVED_SEARCH_SAMPLE_SIZE)
+      .max(MAX_SAVED_SEARCH_SAMPLE_SIZE)
+      .optional()
+      .meta({
+        description:
+          'The number of documents to sample for the data table. If omitted, defaults to the advanced setting "discover:sampleSize".',
+      }),
   })
   .strict()
   .meta({ id: 'discoverSessionEmbeddableDataTableLimitsSchema' });
@@ -73,7 +85,7 @@ export const dataTableSchema = z
   .object({
     column_order: z
       .array(z.string().meta({ description: 'Field name of a column in display order.' }))
-      .max(100)
+      .max(MAX_DISCOVER_SESSION_COLUMNS)
       .optional()
       .meta({
         description:
@@ -83,7 +95,7 @@ export const dataTableSchema = z
       description:
         'Per-column presentation settings keyed by field name (e.g. widths). Keys should correspond to entries in `column_order` when both are set.',
     }),
-    sort: z.array(sortSchema).max(100).default([]).meta({
+    sort: z.array(sortSchema).max(MAX_DISCOVER_SESSION_COLUMNS).default([]).meta({
       description: 'Sort configuration for the data table (field and direction).',
     }),
     density: z
@@ -98,18 +110,18 @@ export const dataTableSchema = z
           'Data grid density. Choose "compact", "expanded", or "normal" for row spacing. If omitted, Discover or the embedding application determines the density from its current settings, such as the user preference.',
       }),
     header_row_height: z
-      .union([z.number().min(1).max(5), z.literal('auto')])
+      .union([z.number().min(0).max(5), z.literal('auto')])
       .optional()
       .meta({
         description:
-          'Header row height. Use a number (1–5) or "auto" to size based on content. If omitted, Discover or the embedding application determines the height from its current settings, such as the user preference.',
+          'Header row height. Use a number (0–5) or "auto" to size based on content. If omitted, Discover or the embedding application determines the height from its current settings, such as the user preference.',
       }),
     row_height: z
-      .union([z.number().min(1).max(20), z.literal('auto')])
+      .union([z.number().min(0).max(20), z.literal('auto')])
       .optional()
       .meta({
         description:
-          'Data row height. Use a number (1–20) or "auto" to size based on content. If omitted, defaults to the advanced setting "discover:rowHeightOption".',
+          'Data row height. Use a number (0–20) or "auto" to size based on content. If omitted, defaults to the advanced setting "discover:rowHeightOption".',
       }),
   })
   .strict()
@@ -119,7 +131,7 @@ export const panelOverridesSchema = z
   .object({
     column_order: z
       .array(z.string().meta({ description: 'Field name of a column in display order.' }))
-      .max(100)
+      .max(MAX_DISCOVER_SESSION_COLUMNS)
       .optional()
       .meta({
         description:
@@ -129,7 +141,7 @@ export const panelOverridesSchema = z
       description:
         'Per-column presentation overrides (e.g. widths) keyed by field name. When set, merges with the source configuration for the referenced session or inline tab.',
     }),
-    sort: z.array(sortSchema).max(100).optional().meta({
+    sort: z.array(sortSchema).max(MAX_DISCOVER_SESSION_COLUMNS).optional().meta({
       description:
         'Sort configuration (field and direction) for the data table. When set, overrides the referenced saved object or the inline tab config in `tabs`. If omitted, the source configuration is used.',
     }),
@@ -145,35 +157,79 @@ export const panelOverridesSchema = z
           'Data grid row spacing: `compact`, `expanded`, or `normal`. When set, overrides the referenced saved object or the inline tab config in `tabs`. If omitted, the source configuration is used.',
       }),
     header_row_height: z
-      .union([z.number().min(1).max(5), z.literal('auto')])
+      .union([z.number().min(0).max(5), z.literal('auto')])
       .optional()
       .meta({
         description:
-          'Header row height: number (1–5) or `auto`. When set, overrides the referenced saved object or the inline tab config in `tabs`. If omitted, the source configuration is used.',
+          'Header row height: number (0–5) or `auto`. When set, overrides the referenced saved object or the inline tab config in `tabs`. If omitted, the source configuration is used.',
       }),
     row_height: z
-      .union([z.number().min(1).max(20), z.literal('auto')])
+      .union([z.number().min(0).max(20), z.literal('auto')])
       .optional()
       .meta({
         description:
-          'Data row height: number (1–20) or `auto`. When set, overrides the referenced saved object or the inline tab config in `tabs`. If omitted, falls back to the source or to the advanced setting "discover:rowHeightOption".',
+          'Data row height: number (0–20) or `auto`. When set, overrides the referenced saved object or the inline tab config in `tabs`. If omitted, falls back to the source or to the advanced setting "discover:rowHeightOption".',
       }),
     rows_per_page: z.number().min(1).max(10000).optional().meta({
       description:
         'Number of rows per page. When set, overrides the referenced saved object or the inline tab config in `tabs`. If omitted, falls back to the source or to the advanced setting "discover:sampleRowsPerPage".',
     }),
-    sample_size: z.number().min(10).max(10000).optional().meta({
-      description:
-        'Number of documents to sample. When set, overrides the referenced saved object or the inline tab config in `tabs`. If omitted, falls back to the source or to the advanced setting "discover:sampleSize".',
-    }),
+    sample_size: z
+      .number()
+      .min(MIN_SAVED_SEARCH_SAMPLE_SIZE)
+      .max(MAX_SAVED_SEARCH_SAMPLE_SIZE)
+      .optional()
+      .meta({
+        description:
+          'Number of documents to sample. When set, overrides the referenced saved object or the inline tab config in `tabs`. If omitted, falls back to the source or to the advanced setting "discover:sampleSize".',
+      }),
   })
   .strict()
   .default({});
+
+export const tabPresentationSchema = z
+  .object({
+    hide_chart: z
+      .boolean()
+      .default(false)
+      .meta({ description: 'When `true`, the chart is hidden.' }),
+    hide_table: z
+      .boolean()
+      .default(false)
+      .meta({ description: 'When `true`, the data table is hidden.' }),
+    hide_aggregated_preview: z
+      .boolean()
+      .optional()
+      .meta({ description: 'When `true`, aggregated preview panels are hidden.' }),
+    breakdown_field: z
+      .string()
+      .max(MAX_BREAKDOWN_FIELD_LENGTH)
+      .optional()
+      .meta({ description: 'Field name used to split chart data into series.' }),
+    chart_interval: z
+      .union([
+        z.literal('auto'),
+        z.literal('ms'),
+        z.literal('s'),
+        z.literal('m'),
+        z.literal('h'),
+        z.literal('d'),
+        z.literal('w'),
+        z.literal('M'),
+        z.literal('y'),
+      ])
+      .optional()
+      .meta({
+        description: 'Time interval for the chart histogram on this tab.',
+      }),
+  })
+  .strict();
 
 export const classicTabSchema = z
   .object({
     ...dataTableSchema.shape,
     ...dataTableLimitsSchema.shape,
+    ...tabPresentationSchema.shape,
     query: asCodeQuerySchema.optional(),
     filters: z.array(asCodeFilterSchema).max(100).default([]).meta({
       description: 'List of filters to apply to the data in the tab.',
@@ -187,6 +243,7 @@ export const esqlTabSchema = z
   .object({
     ...dataTableSchema.shape,
     ...dataTableLimitsSchema.shape,
+    ...tabPresentationSchema.shape,
     data_source: esqlDataSourceSchema,
   })
   .strict()

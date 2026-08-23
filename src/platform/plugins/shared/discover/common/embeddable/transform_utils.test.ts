@@ -43,6 +43,7 @@ import {
   SAVED_SEARCH_SAVED_OBJECT_REF_NAME,
 } from './constants';
 import { SavedSearchType, VIEW_MODE } from '@kbn/saved-search-plugin/common';
+import type { DiscoverSessionTabAttributes } from '@kbn/saved-search-plugin/server';
 import type {
   DiscoverSessionEmbeddableByReferenceState,
   DiscoverSessionEmbeddableByValueState,
@@ -208,6 +209,8 @@ describe('search embeddable transform utils', () => {
           {
             column_order: ['message'],
             sort: [],
+            hide_chart: false,
+            hide_table: false,
             view_mode: VIEW_MODE.DOCUMENT_LEVEL,
             density: DataGridDensity.COMPACT,
             header_row_height: 'auto',
@@ -293,6 +296,8 @@ describe('search embeddable transform utils', () => {
             ],
             sort: [{ name: '@timestamp', direction: 'desc' }],
             column_order: ['message'],
+            hide_chart: false,
+            hide_table: false,
             view_mode: VIEW_MODE.DOCUMENT_LEVEL,
             data_source: {
               type: AS_CODE_DATA_VIEW_REFERENCE_TYPE,
@@ -473,6 +478,8 @@ describe('search embeddable transform utils', () => {
             column_order: ['message', '@timestamp'],
             column_settings: { '@timestamp': { width: 200 } },
             sort: [{ name: '@timestamp', direction: 'desc' }],
+            hide_chart: false,
+            hide_table: false,
             view_mode: VIEW_MODE.DOCUMENT_LEVEL,
             density: DataGridDensity.COMPACT,
             header_row_height: 'auto',
@@ -524,6 +531,8 @@ describe('search embeddable transform utils', () => {
           {
             column_order: ['foo'],
             sort: [],
+            hide_chart: false,
+            hide_table: false,
             view_mode: VIEW_MODE.DOCUMENT_LEVEL,
             density: DataGridDensity.COMPACT,
             header_row_height: 50,
@@ -1049,6 +1058,8 @@ describe('search embeddable transform utils', () => {
         column_order: ['message', '@timestamp'],
         column_settings: { '@timestamp': { width: 200 } },
         sort: [{ name: '@timestamp', direction: 'desc' }],
+        hide_chart: false,
+        hide_table: false,
         view_mode: VIEW_MODE.DOCUMENT_LEVEL,
         density: DataGridDensity.COMPACT,
         header_row_height: 'auto',
@@ -1097,6 +1108,8 @@ describe('search embeddable transform utils', () => {
       const apiTab: DiscoverSessionEmbeddableByValueState['tabs'][0] = {
         column_order: [],
         sort: [],
+        hide_chart: false,
+        hide_table: false,
         view_mode: VIEW_MODE.DOCUMENT_LEVEL,
         density: DataGridDensity.COMPACT,
         header_row_height: 3,
@@ -1129,6 +1142,8 @@ describe('search embeddable transform utils', () => {
       const apiTab: DiscoverSessionEmbeddableByValueState['tabs'][0] = {
         column_order: ['foo'],
         sort: [],
+        hide_chart: false,
+        hide_table: false,
         view_mode: VIEW_MODE.DOCUMENT_LEVEL,
         density: DataGridDensity.COMPACT,
         header_row_height: 3,
@@ -1155,6 +1170,8 @@ describe('search embeddable transform utils', () => {
       const apiTab: DiscoverSessionEmbeddableByValueState['tabs'][0] = {
         column_order: ['@timestamp'],
         sort: [],
+        hide_chart: false,
+        hide_table: false,
         density: DataGridDensity.COMPACT,
         header_row_height: 3,
         row_height: 3,
@@ -1167,6 +1184,58 @@ describe('search embeddable transform utils', () => {
       expect(searchSource.query).toEqual({ esql });
       expect(searchSource.index).toBeUndefined();
       expect(searchSource.filter).toBeUndefined();
+    });
+  });
+
+  describe('by-value chart presentation preservation', () => {
+    const esqlQuery = 'FROM logs-* | STATS count = COUNT(*) BY host.name';
+    const apiChartState = {
+      hide_chart: true,
+      hide_table: true,
+      hide_aggregated_preview: true,
+      breakdown_field: 'host.name',
+      chart_interval: 'h' as const,
+    };
+    const storedTab: DiscoverSessionTabAttributes = {
+      sort: [],
+      columns: ['host.name'],
+      grid: {},
+      hideChart: true,
+      hideTable: true,
+      hideAggregatedPreview: true,
+      isTextBasedQuery: true,
+      breakdownField: 'host.name',
+      chartInterval: 'h',
+      kibanaSavedObjectMeta: {
+        searchSourceJSON: JSON.stringify({
+          query: { esql: esqlQuery },
+        }),
+      },
+    };
+
+    it('maps Discover-owned chart presentation to the declarative tab', () => {
+      const apiTab = fromStoredTab(storedTab);
+
+      expect(apiTab).toMatchObject(apiChartState);
+    });
+
+    it('restores Discover-owned chart presentation from the declarative tab', () => {
+      const { state: reverted } = toStoredTab({
+        sort: [],
+        data_source: {
+          type: AS_CODE_ESQL_DATA_SOURCE_TYPE,
+          query: esqlQuery,
+        },
+        ...apiChartState,
+      });
+
+      expect(reverted).toMatchObject({
+        hideChart: true,
+        hideTable: true,
+        hideAggregatedPreview: true,
+        breakdownField: 'host.name',
+        chartInterval: 'h',
+      });
     });
   });
 });

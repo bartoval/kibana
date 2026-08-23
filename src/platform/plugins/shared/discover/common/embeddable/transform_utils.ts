@@ -202,6 +202,15 @@ export function fromStoredTab(
   const apiTab = {
     ...toDiscoverSessionPanelOverrides(tab),
     sort: fromStoredSort(sort),
+    hide_chart: tab.hideChart ?? false,
+    hide_table: tab.hideTable ?? false,
+    ...(tab.hideAggregatedPreview !== undefined && {
+      hide_aggregated_preview: tab.hideAggregatedPreview,
+    }),
+    ...(tab.breakdownField !== undefined && { breakdown_field: tab.breakdownField }),
+    ...(tab.chartInterval !== undefined && {
+      chart_interval: tab.chartInterval as Exclude<DiscoverSessionTab['chart_interval'], undefined>,
+    }),
   };
   const searchSourceValues = parseSearchSourceJSON(searchSourceJSON);
   const { index, query, filter } = injectReferences(searchSourceValues, references);
@@ -246,8 +255,11 @@ export function toStoredTab(
     sort: toStoredSort(sort),
     columns: columnOrder ?? [],
     grid: toStoredGrid(columnSettings),
-    hideChart: false,
-    hideTable: false,
+    hideChart: apiTab.hide_chart ?? false,
+    hideTable: apiTab.hide_table ?? false,
+    hideAggregatedPreview: apiTab.hide_aggregated_preview,
+    breakdownField: apiTab.breakdown_field,
+    chartInterval: apiTab.chart_interval,
     isTextBasedQuery: isDiscoverSessionEsqlTab(apiTab),
     kibanaSavedObjectMeta: { searchSourceJSON: JSON.stringify(searchSourceFields) },
     ...('view_mode' in apiTab && { viewMode: apiTab.view_mode }),
@@ -265,10 +277,12 @@ export function toDiscoverSessionPanelOverrides(
     ...(columns && { column_order: columns }),
     ...(grid &&
       Object.keys(grid?.columns ?? {}).length && { column_settings: fromStoredGrid(grid) }),
-    ...(rowHeight && { row_height: fromStoredRowHeight(rowHeight) }),
-    ...(sampleSize && { sample_size: sampleSize }),
-    ...(rowsPerPage && { rows_per_page: rowsPerPage }),
-    ...(headerRowHeight && { header_row_height: fromStoredRowHeight(headerRowHeight) }),
+    ...(rowHeight !== undefined && { row_height: fromStoredRowHeight(rowHeight) }),
+    ...(sampleSize !== undefined && { sample_size: sampleSize }),
+    ...(rowsPerPage !== undefined && { rows_per_page: rowsPerPage }),
+    ...(headerRowHeight !== undefined && {
+      header_row_height: fromStoredRowHeight(headerRowHeight),
+    }),
     ...(density && { density }),
   };
 }
@@ -289,10 +303,10 @@ export function fromDiscoverSessionPanelOverrides(
   return {
     ...(sort && { sort: toStoredSort(sort) }),
     ...(columnOrder && { columns: columnOrder }),
-    ...(rowHeight && { rowHeight: toStoredHeight(rowHeight) }),
-    ...(sampleSize && { sampleSize }),
-    ...(rowsPerPage && { rowsPerPage }),
-    ...(headerRowHeight && { headerRowHeight: toStoredHeight(headerRowHeight) }),
+    ...(rowHeight !== undefined && { rowHeight: toStoredHeight(rowHeight) }),
+    ...(sampleSize !== undefined && { sampleSize }),
+    ...(rowsPerPage !== undefined && { rowsPerPage }),
+    ...(headerRowHeight !== undefined && { headerRowHeight: toStoredHeight(headerRowHeight) }),
     ...(density && { density }),
     ...(Object.keys(columnSettings ?? {}).length && { grid: toStoredGrid(columnSettings) }),
   };

@@ -233,6 +233,8 @@ describe('searchEmbeddableTransforms', () => {
               column_order: ['message', '@timestamp'],
               column_settings: { '@timestamp': { width: 200 } },
               sort: [{ name: '@timestamp', direction: 'desc' }],
+              hide_chart: false,
+              hide_table: false,
               view_mode: VIEW_MODE.DOCUMENT_LEVEL,
               density: DataGridDensity.COMPACT,
               header_row_height: 'auto',
@@ -273,6 +275,8 @@ describe('searchEmbeddableTransforms', () => {
             {
               column_order: ['_source'],
               sort: [],
+              hide_chart: false,
+              hide_table: false,
               view_mode: VIEW_MODE.DOCUMENT_LEVEL,
               density: DataGridDensity.COMPACT,
               header_row_height: 3,

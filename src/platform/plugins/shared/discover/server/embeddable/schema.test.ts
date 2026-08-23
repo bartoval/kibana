@@ -43,6 +43,14 @@ describe('classicTabSchema', () => {
     expect(validated.filters).toEqual([]);
     expect(validated.sort).toEqual([]);
     expect(validated.view_mode).toBe(VIEW_MODE.DOCUMENT_LEVEL);
+    expect(validated.hide_chart).toBe(false);
+    expect(validated.hide_table).toBe(false);
+  });
+
+  it('accepts legacy zero row heights', () => {
+    expect(
+      classicTabSchema.parse({ ...classicTabInput, row_height: 0, header_row_height: 0 })
+    ).toMatchObject({ row_height: 0, header_row_height: 0 });
   });
 
   it('validates query and filters using as-code schemas', () => {
@@ -109,6 +117,8 @@ describe('esqlTabSchema', () => {
     expect(validated.data_source.type).toBe(AS_CODE_ESQL_DATA_SOURCE_TYPE);
     expect(validated.data_source.query).toBe('FROM logs-* | LIMIT 10');
     expect(validated.sort).toEqual([]);
+    expect(validated.hide_chart).toBe(false);
+    expect(validated.hide_table).toBe(false);
   });
 
   it('rejects a nested data_source shape', () => {
@@ -137,6 +147,34 @@ describe('esqlTabSchema', () => {
     expect(validated.rows_per_page).toBe(25);
     expect(validated.sample_size).toBe(500);
   });
+
+  const storageCompatibleDataTableCases = [
+    {
+      name: 'a sample size below the previous panel minimum',
+      value: { sample_size: 5 },
+    },
+    {
+      name: 'more than 100 columns',
+      value: {
+        column_order: Array.from({ length: 101 }, (_, index) => `field_${index}`),
+      },
+    },
+    {
+      name: 'more than 100 sort entries',
+      value: {
+        sort: Array.from({ length: 101 }, (_, index) => ({
+          name: `field_${index}`,
+          direction: 'desc',
+        })),
+      },
+    },
+  ];
+
+  for (const { name, value } of storageCompatibleDataTableCases) {
+    it(`accepts ${name} when the saved object storage accepts it`, () => {
+      expect(esqlTabSchema.parse({ ...esqlTabInput, ...value })).toMatchObject(value);
+    });
+  }
 });
 
 describe('tabSchema', () => {

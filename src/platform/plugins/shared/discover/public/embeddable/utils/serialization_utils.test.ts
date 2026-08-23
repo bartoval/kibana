@@ -73,6 +73,8 @@ describe('Serialization utils', () => {
       {
         column_order: ['_source'],
         sort: [{ name: 'order_date', direction: 'desc' }],
+        hide_chart: false,
+        hide_table: false,
         view_mode: VIEW_MODE.DOCUMENT_LEVEL,
         density: DataGridDensity.COMPACT,
         header_row_height: 'auto',
