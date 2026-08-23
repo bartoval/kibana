@@ -202,15 +202,6 @@ export function fromStoredTab(
   const apiTab = {
     ...toDiscoverSessionPanelOverrides(tab),
     sort: fromStoredSort(sort),
-    hide_chart: tab.hideChart ?? false,
-    hide_table: tab.hideTable ?? false,
-    ...(tab.hideAggregatedPreview !== undefined && {
-      hide_aggregated_preview: tab.hideAggregatedPreview,
-    }),
-    ...(tab.breakdownField !== undefined && { breakdown_field: tab.breakdownField }),
-    ...(tab.chartInterval !== undefined && {
-      chart_interval: tab.chartInterval as Exclude<DiscoverSessionTab['chart_interval'], undefined>,
-    }),
   };
   const searchSourceValues = parseSearchSourceJSON(searchSourceJSON);
   const { index, query, filter } = injectReferences(searchSourceValues, references);
@@ -255,11 +246,8 @@ export function toStoredTab(
     sort: toStoredSort(sort),
     columns: columnOrder ?? [],
     grid: toStoredGrid(columnSettings),
-    hideChart: apiTab.hide_chart ?? false,
-    hideTable: apiTab.hide_table ?? false,
-    hideAggregatedPreview: apiTab.hide_aggregated_preview,
-    breakdownField: apiTab.breakdown_field,
-    chartInterval: apiTab.chart_interval,
+    hideChart: false,
+    hideTable: false,
     isTextBasedQuery: isDiscoverSessionEsqlTab(apiTab),
     kibanaSavedObjectMeta: { searchSourceJSON: JSON.stringify(searchSourceFields) },
     ...('view_mode' in apiTab && { viewMode: apiTab.view_mode }),

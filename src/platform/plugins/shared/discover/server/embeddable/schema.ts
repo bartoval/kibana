@@ -28,8 +28,6 @@ import { dataViewSchema } from '@kbn/as-code-data-views-schema';
 import type { GetDrilldownsSchemaFnType } from '@kbn/embeddable-plugin/server';
 import { ON_OPEN_PANEL_MENU } from '@kbn/ui-actions-plugin/common/trigger_ids';
 
-export const MAX_BREAKDOWN_FIELD_LENGTH = 1000;
-
 const columnSettingsEntrySchema = z
   .object({
     width: z.number().min(0).optional().meta({
@@ -187,49 +185,10 @@ export const panelOverridesSchema = z
   .strict()
   .default({});
 
-export const tabPresentationSchema = z
-  .object({
-    hide_chart: z
-      .boolean()
-      .default(false)
-      .meta({ description: 'When `true`, the chart is hidden.' }),
-    hide_table: z
-      .boolean()
-      .default(false)
-      .meta({ description: 'When `true`, the data table is hidden.' }),
-    hide_aggregated_preview: z
-      .boolean()
-      .optional()
-      .meta({ description: 'When `true`, aggregated preview panels are hidden.' }),
-    breakdown_field: z
-      .string()
-      .max(MAX_BREAKDOWN_FIELD_LENGTH)
-      .optional()
-      .meta({ description: 'Field name used to split chart data into series.' }),
-    chart_interval: z
-      .union([
-        z.literal('auto'),
-        z.literal('ms'),
-        z.literal('s'),
-        z.literal('m'),
-        z.literal('h'),
-        z.literal('d'),
-        z.literal('w'),
-        z.literal('M'),
-        z.literal('y'),
-      ])
-      .optional()
-      .meta({
-        description: 'Time interval for the chart histogram on this tab.',
-      }),
-  })
-  .strict();
-
 export const classicTabSchema = z
   .object({
     ...dataTableSchema.shape,
     ...dataTableLimitsSchema.shape,
-    ...tabPresentationSchema.shape,
     query: asCodeQuerySchema.optional(),
     filters: z.array(asCodeFilterSchema).max(100).default([]).meta({
       description: 'List of filters to apply to the data in the tab.',
@@ -243,7 +202,6 @@ export const esqlTabSchema = z
   .object({
     ...dataTableSchema.shape,
     ...dataTableLimitsSchema.shape,
-    ...tabPresentationSchema.shape,
     data_source: esqlDataSourceSchema,
   })
   .strict()

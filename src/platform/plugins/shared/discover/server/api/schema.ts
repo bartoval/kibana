@@ -29,13 +29,12 @@ import { refreshIntervalSchema } from '@kbn/data-service-server';
 import { timeRangeSchema } from '@kbn/es-query-server';
 import { MAX_DISCOVER_SESSION_TABS } from '@kbn/saved-search-plugin/common';
 import { UnifiedHistogramSuggestionType } from '@kbn/discover-utils';
-import { classicTabSchema, esqlTabSchema, tabPresentationSchema } from '../embeddable/schema';
-
-export { MAX_BREAKDOWN_FIELD_LENGTH } from '../embeddable/schema';
+import { classicTabSchema, esqlTabSchema } from '../embeddable/schema';
 
 export const MAX_SESSION_TITLE_LENGTH = 256;
 export const MAX_SESSION_DESCRIPTION_LENGTH = 1000;
 export const MAX_TAB_LABEL_LENGTH = 120;
+export const MAX_BREAKDOWN_FIELD_LENGTH = 1000;
 export const MAX_VIS_CONTEXT_ATTRIBUTE_KEY_LENGTH = 256;
 export const MAX_DISCOVER_SESSION_CONTROL_PANELS = 100;
 export const MAX_DISCOVER_SESSION_TAGS = 1000;
@@ -107,7 +106,39 @@ export const discoverSessionControlPanelsSchema = z
 
 const discoverSessionTabPresentationSchema = z
   .object({
-    ...tabPresentationSchema.shape,
+    hide_chart: z
+      .boolean()
+      .default(false)
+      .meta({ description: 'When `true`, the chart is hidden.' }),
+    hide_table: z
+      .boolean()
+      .default(false)
+      .meta({ description: 'When `true`, the data table is hidden.' }),
+    hide_aggregated_preview: z
+      .boolean()
+      .optional()
+      .meta({ description: 'When `true`, aggregated preview panels are hidden.' }),
+    breakdown_field: z
+      .string()
+      .max(MAX_BREAKDOWN_FIELD_LENGTH)
+      .optional()
+      .meta({ description: 'Field name used to split chart data into series.' }),
+    chart_interval: z
+      .union([
+        z.literal('auto'),
+        z.literal('ms'),
+        z.literal('s'),
+        z.literal('m'),
+        z.literal('h'),
+        z.literal('d'),
+        z.literal('w'),
+        z.literal('M'),
+        z.literal('y'),
+      ])
+      .optional()
+      .meta({
+        description: 'Time interval for the chart histogram on this tab.',
+      }),
     time_restore: z.boolean().default(false).meta({
       description:
         "When `true`, Discover applies this tab's `time_range` and `refresh_interval`. When `false`, those fields are ignored and global time settings are used.",

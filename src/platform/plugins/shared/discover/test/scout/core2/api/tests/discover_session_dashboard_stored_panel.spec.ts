@@ -139,43 +139,6 @@ apiTest.describe(
       return response.body.data.panels[0].config.tabs[0];
     };
 
-    apiTest(
-      'preserves Discover-owned chart presentation through Dashboard GET and PUT',
-      async ({ apiClient, kbnClient }) => {
-        const { id, response: initialResponse } = await seedAndRead(
-          apiClient,
-          kbnClient,
-          storedEsqlTab({
-            hideChart: true,
-            hideTable: true,
-            hideAggregatedPreview: true,
-            breakdownField: 'host.name',
-            chartInterval: 'h',
-          })
-        );
-
-        const initialTab = getOnlyDiscoverTab(initialResponse);
-        expect(initialTab).toMatchObject({
-          hide_chart: true,
-          hide_table: true,
-          hide_aggregated_preview: true,
-          breakdown_field: 'host.name',
-          chart_interval: 'h',
-        });
-
-        await updateDashboard(apiClient, id, initialResponse.body.data);
-
-        const savedTab = getOnlyDiscoverTab(await readDashboard(apiClient, id));
-        expect(savedTab).toMatchObject({
-          hide_chart: true,
-          hide_table: true,
-          hide_aggregated_preview: true,
-          breakdown_field: 'host.name',
-          chart_interval: 'h',
-        });
-      }
-    );
-
     const oversizedColumns = Array.from({ length: 101 }, (_, index) => `field_${index}`);
     const oversizedSort = Array.from(
       { length: 101 },

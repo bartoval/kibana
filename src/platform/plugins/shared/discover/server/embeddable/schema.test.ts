@@ -43,8 +43,6 @@ describe('classicTabSchema', () => {
     expect(validated.filters).toEqual([]);
     expect(validated.sort).toEqual([]);
     expect(validated.view_mode).toBe(VIEW_MODE.DOCUMENT_LEVEL);
-    expect(validated.hide_chart).toBe(false);
-    expect(validated.hide_table).toBe(false);
   });
 
   it('accepts legacy zero row heights', () => {
@@ -117,8 +115,6 @@ describe('esqlTabSchema', () => {
     expect(validated.data_source.type).toBe(AS_CODE_ESQL_DATA_SOURCE_TYPE);
     expect(validated.data_source.query).toBe('FROM logs-* | LIMIT 10');
     expect(validated.sort).toEqual([]);
-    expect(validated.hide_chart).toBe(false);
-    expect(validated.hide_table).toBe(false);
   });
 
   it('rejects a nested data_source shape', () => {
