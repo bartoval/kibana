@@ -27,4 +27,6 @@ export {
   toStoredSearchEmbeddable,
   toStoredSearchEmbeddableByValue,
   fromDiscoverSessionPanelOverrides,
+  fromStoredTab,
+  toSerializedSearchSourceFields,
 } from './transform_utils';

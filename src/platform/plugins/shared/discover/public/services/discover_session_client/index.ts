@@ -8,7 +8,7 @@
  */
 
 export {
-  transformVisContextIn,
-  transformVisContextOut,
-  type StoredVisContextRequestData,
-} from '../../../common/discover_session_api/transform_vis_context';
+  createDiscoverSessionClient,
+  type DiscoverSessionClient,
+  type DiscoverSessionGetResult,
+} from './discover_session_client';

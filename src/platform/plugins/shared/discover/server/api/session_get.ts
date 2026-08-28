@@ -21,7 +21,7 @@ import { transformDiscoverSessionOut } from './transforms';
 export const getDiscoverSession = async (
   requestContext: RequestHandlerContext,
   id: string
-): Promise<DiscoverSessionGetResponse> => {
+): Promise<{ body: DiscoverSessionGetResponse; resolveHeaders: Record<string, string> }> => {
   const { core } = await requestContext.resolve(['core']);
   const result = await core.savedObjects.client.resolve<DiscoverSessionAttributes>(
     SavedSearchType,
@@ -43,10 +43,25 @@ export const getDiscoverSession = async (
     savedObject.references
   );
 
+  const resolveHeaders: Record<string, string> = {
+    'kbn-resolve-outcome': result.outcome,
+  };
+
+  if (result.alias_target_id) {
+    resolveHeaders['kbn-resolve-alias-target-id'] = result.alias_target_id;
+  }
+
+  if (result.alias_purpose) {
+    resolveHeaders['kbn-resolve-purpose'] = result.alias_purpose;
+  }
+
   return {
-    id: savedObject.id,
-    data: sessionState,
-    meta: getMeta(savedObject),
-    ...(warnings.length > 0 && { warnings }),
+    body: {
+      id: savedObject.id,
+      data: sessionState,
+      meta: getMeta(savedObject),
+      ...(warnings.length > 0 && { warnings }),
+    },
+    resolveHeaders,
   };
 };

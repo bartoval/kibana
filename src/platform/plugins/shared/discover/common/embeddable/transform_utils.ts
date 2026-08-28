@@ -237,15 +237,10 @@ export function toStoredTab(
   references: SavedObjectReference[];
 } {
   const { sort, column_order: columnOrder, column_settings: columnSettings } = apiTab;
-  const storedQuery = isDiscoverSessionEsqlTab(apiTab)
-    ? { esql: apiTab.data_source.query }
-    : toStoredQuery(apiTab.query);
-  const searchSourceValues: SerializedSearchSourceFields = {
-    ...(storedQuery && { query: storedQuery }),
-    ...('filters' in apiTab && { filter: toStoredFilters(apiTab.filters) }),
-    ...(!isDiscoverSessionEsqlTab(apiTab) && { index: toStoredDataView(apiTab.data_source) }),
-  };
-  const [searchSourceFields, references] = extractReferences(searchSourceValues, options);
+  const [searchSourceFields, references] = extractReferences(
+    toSerializedSearchSourceFields(apiTab),
+    options
+  );
   const state: DiscoverSessionTabAttributes = {
     ...fromDiscoverSessionPanelOverrides(apiTab),
     sort: toStoredSort(sort),
@@ -258,6 +253,22 @@ export function toStoredTab(
     ...('view_mode' in apiTab && { viewMode: apiTab.view_mode }),
   };
   return { state, references };
+}
+
+export function toSerializedSearchSourceFields(
+  apiTab: DiscoverSessionTab
+): SerializedSearchSourceFields {
+  if (isDiscoverSessionEsqlTab(apiTab)) {
+    return { query: { esql: apiTab.data_source.query } };
+  }
+
+  const storedQuery = toStoredQuery(apiTab.query);
+
+  return {
+    ...(storedQuery && { query: storedQuery }),
+    filter: toStoredFilters(apiTab.filters),
+    index: toStoredDataView(apiTab.data_source),
+  };
 }
 
 export function toDiscoverSessionPanelOverrides(

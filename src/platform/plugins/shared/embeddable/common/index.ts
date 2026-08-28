@@ -16,3 +16,5 @@ export type {
   EmbeddableStateWithType,
   EmbeddablePersistableStateService,
 } from '../server';
+
+export { transformType } from './bwc/transform_type';

@@ -316,6 +316,11 @@ export function createDiscoverServicesMock(): DiscoverServices {
     cps: cpsPluginMock.createStartContract(),
     setHeaderActionMenu: jest.fn(),
     discoverShared: discoverSharedPluginMock.createStartContract(),
+    discoverSessionClient: {
+      get: jest.fn(),
+      create: jest.fn(),
+      upsert: jest.fn(),
+    },
     discoverFeatureFlags: {
       getCascadeLayoutEnabled: jest.fn(() => false),
       getIsEsqlDefault: jest.fn(() => false),

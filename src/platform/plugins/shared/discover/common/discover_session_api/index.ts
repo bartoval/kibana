@@ -7,24 +7,18 @@
  * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
-export const PLUGIN_ID = 'discover';
-export const APP_ICON = 'discoverApp';
-
-export { APP_STATE_URL_KEY } from './constants';
-export { DISCOVER_APP_LOCATOR } from './app_locator';
-export type {
-  DiscoverAppLocator,
-  DiscoverAppLocatorParams,
-  MainHistoryLocationState,
-} from './app_locator';
-
-export type { DiscoverESQLLocator, DiscoverESQLLocatorParams } from './esql_locator';
-
-export type { NonPersistedDisplayOptions, SearchEmbeddableState } from './embeddable/types';
-
 export {
   fromDiscoverSessionApiResponse,
   toDiscoverSessionApiData,
   type DiscoverSessionResolve,
   type DiscoverSessionSource,
-} from './discover_session_api';
+} from './transform_discover_session';
+
+export { transformControlPanelsIn, transformControlPanelsOut } from './transform_control_panels';
+
+export {
+  getVisContextRequestData,
+  transformVisContextIn,
+  transformVisContextOut,
+  type StoredVisContextRequestData,
+} from './transform_vis_context';

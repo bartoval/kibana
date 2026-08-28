@@ -81,6 +81,10 @@ import {
 } from './constants';
 import { EmbeddableEditorService } from './plugin_imports/embeddable_editor_service';
 import { InitialTabStateService } from './plugin_imports/initial_tab_state_service';
+import {
+  createDiscoverSessionClient,
+  type DiscoverSessionClient,
+} from './services/discover_session_client';
 
 /**
  * Location state of internal Discover history instance
@@ -115,6 +119,7 @@ export interface DiscoverServices {
   core: CoreStart;
   data: DataPublicPluginStart;
   discoverShared: DiscoverSharedPublicStart;
+  discoverSessionClient: DiscoverSessionClient;
   discoverFeatureFlags: DiscoverFeatureFlags;
   docLinks: DocLinksStart;
   embeddable: EmbeddableStart;
@@ -217,6 +222,7 @@ export const buildServices = ({
     data: plugins.data,
     dataVisualizer: plugins.dataVisualizer,
     discoverShared: plugins.discoverShared,
+    discoverSessionClient: createDiscoverSessionClient(core.http),
     discoverFeatureFlags: {
       getCascadeLayoutEnabled: () =>
         core.featureFlags.getBooleanValue(CASCADE_LAYOUT_ENABLED_FEATURE_FLAG_KEY, true),

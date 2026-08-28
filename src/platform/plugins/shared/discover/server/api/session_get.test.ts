@@ -13,6 +13,43 @@ import { SavedSearchType } from '@kbn/saved-search-plugin/common';
 import { getDiscoverSession } from './session_get';
 
 describe('getDiscoverSession', () => {
+  it('returns resolve headers with the session response', async () => {
+    const id = 'legacy-session';
+    const core = coreMock.createRequestHandlerContext();
+
+    core.savedObjects.client.resolve.mockResolvedValue({
+      outcome: 'aliasMatch',
+      alias_target_id: 'session-1',
+      alias_purpose: 'savedObjectConversion',
+      saved_object: {
+        id: 'session-1',
+        type: SavedSearchType,
+        attributes: {
+          title: 'Session',
+          description: '',
+          tabs: [],
+        },
+        references: [],
+      },
+    });
+
+    const requestContext = {
+      resolve: jest.fn().mockResolvedValue({ core }),
+    } as unknown as RequestHandlerContext;
+
+    await expect(getDiscoverSession(requestContext, id)).resolves.toMatchObject({
+      body: {
+        id: 'session-1',
+        data: { title: 'Session', description: '', tabs: [] },
+      },
+      resolveHeaders: {
+        'kbn-resolve-outcome': 'aliasMatch',
+        'kbn-resolve-alias-target-id': 'session-1',
+        'kbn-resolve-purpose': 'savedObjectConversion',
+      },
+    });
+  });
+
   it('throws a 409 error when resolving the saved object results in a conflict', async () => {
     const id = 'conflicting-session';
     const core = coreMock.createRequestHandlerContext();
