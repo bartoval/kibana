@@ -9,7 +9,6 @@
 
 import { createHttpFetchError } from '@kbn/core-http-browser-mocks';
 import { httpServiceMock } from '@kbn/core/public/mocks';
-import { SavedObjectNotFound } from '@kbn/kibana-utils-plugin/public';
 import {
   DISCOVER_SESSION_API_BASE_PATH,
   DISCOVER_SESSION_API_VERSION,
@@ -39,11 +38,24 @@ describe('Discover session API client', () => {
   it('gets a session with the expected path and API version', async () => {
     const http = httpServiceMock.createStartContract();
     const client = createDiscoverSessionClient(http);
-    http.get.mockResolvedValue(response);
+    http.get.mockResolvedValue({
+      body: response,
+      response: new Response(undefined, {
+        headers: { 'kbn-resolve-outcome': 'exactMatch' },
+      }),
+    });
 
-    await expect(client.get('session-id')).resolves.toBe(response);
+    await expect(client.get('session-id')).resolves.toEqual({
+      ...response,
+      resolve: {
+        outcome: 'exactMatch',
+        aliasTargetId: undefined,
+        aliasPurpose: undefined,
+      },
+    });
     expect(http.get).toHaveBeenCalledWith(`${DISCOVER_SESSION_API_BASE_PATH}/session-id`, {
       version: DISCOVER_SESSION_API_VERSION,
+      asResponse: true,
     });
   });
 
@@ -71,7 +83,10 @@ describe('Discover session API client', () => {
       )
     );
 
-    await expect(client.get('missing-session')).rejects.toBeInstanceOf(SavedObjectNotFound);
+    await expect(client.get('missing-session')).rejects.toMatchObject({
+      savedObjectType: 'search',
+      savedObjectId: 'missing-session',
+    });
   });
 
   it('preserves GET errors that are not 404 responses', async () => {
@@ -81,6 +96,30 @@ describe('Discover session API client', () => {
     http.get.mockRejectedValue(error);
 
     await expect(client.get('session-id')).rejects.toBe(error);
+  });
+
+  it('returns conflict resolution metadata from the GET response headers', async () => {
+    const http = httpServiceMock.createStartContract();
+    const client = createDiscoverSessionClient(http);
+    http.get.mockResolvedValue({
+      body: response,
+      response: new Response(undefined, {
+        headers: {
+          'kbn-resolve-outcome': 'conflict',
+          'kbn-resolve-alias-target-id': 'other-session',
+          'kbn-resolve-purpose': 'savedObjectConversion',
+        },
+      }),
+    });
+
+    await expect(client.get('conflicting-session')).resolves.toEqual({
+      ...response,
+      resolve: {
+        outcome: 'conflict',
+        aliasTargetId: 'other-session',
+        aliasPurpose: 'savedObjectConversion',
+      },
+    });
   });
 
   it.each([

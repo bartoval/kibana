@@ -24,14 +24,15 @@ import type { DiscoverSessionClient } from './api_client';
 import { toApiControlPanels, toControlGroupJson } from './control_panels';
 import { toApiVisContext, toRuntimeVisContext } from './vis_context';
 
-type ApiResponse = Awaited<ReturnType<DiscoverSessionClient['get']>>;
+type ApiResponse = Awaited<ReturnType<DiscoverSessionClient['create']>>;
+type ApiResolve = Awaited<ReturnType<DiscoverSessionClient['get']>>['resolve'];
 type ApiData = ApiResponse['data'];
 type ApiTab = ApiResponse['data']['tabs'][number];
 
 /** Converts an API response into the state used while Discover is running. */
 export const fromDiscoverSessionApiResponse = (
   response: ApiResponse,
-  requestedId?: string,
+  resolve?: ApiResolve,
   previousTabs: DiscoverSessionTab[] = []
 ): DiscoverSession => {
   const previousTabsById = new Map(previousTabs.map((tab) => [tab.id, tab]));
@@ -49,10 +50,7 @@ export const fromDiscoverSessionApiResponse = (
     tabs: materializedTabs.map(({ tab }) => tab),
     managed: response.meta.managed ?? false,
     references: [...tagReferences, ...materializedTabs.flatMap(({ references }) => references)],
-    ...(requestedId !== undefined &&
-      requestedId !== response.id && {
-        sharingSavedObjectProps: { outcome: 'aliasMatch', aliasTargetId: response.id },
-      }),
+    ...(resolve?.outcome !== undefined && { sharingSavedObjectProps: resolve }),
   };
 };
 

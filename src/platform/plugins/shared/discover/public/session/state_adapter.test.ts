@@ -21,6 +21,7 @@ import { fromDiscoverSessionApiResponse, toDiscoverSessionApiData } from './stat
 type ApiResponse = Parameters<typeof fromDiscoverSessionApiResponse>[0];
 type ApiTab = ApiResponse['data']['tabs'][number];
 type ApiClassicTab = Exclude<ApiTab, { data_source: { type: 'esql' } }>;
+type ApiEsqlTab = Extract<ApiTab, { data_source: { type: 'esql' } }>;
 type ApiInlineDataView = Extract<ApiClassicTab['data_source'], { type: 'data_view_spec' }>;
 
 jest.mock('uuid', () => ({ v4: jest.fn(() => 'runtime-inline-id') }));
@@ -88,7 +89,7 @@ const response: ApiResponse = {
         sort: [{ name: '@timestamp', direction: 'asc' }],
         column_order: ['@timestamp', 'message'],
         column_settings: { message: { width: 320 } },
-        data_source: { type: 'esql', query: 'FROM logs-*' },
+        data_source: { type: 'esql', query: 'FROM logs-* | WHERE status == 500' },
         hide_chart: false,
         hide_table: false,
         hide_aggregated_preview: true,
@@ -215,6 +216,16 @@ describe('Discover session state adapter', () => {
     const session = fromDiscoverSessionApiResponse(response);
 
     expect(toDiscoverSessionApiData(session)).toEqual(response.data);
+  });
+
+  it('round-trips ES|QL filtering as part of the query', () => {
+    const session = fromDiscoverSessionApiResponse(response);
+    const esqlTab = toDiscoverSessionApiData(session).tabs.find(
+      (tab): tab is ApiEsqlTab => tab.data_source.type === 'esql'
+    );
+
+    expect(esqlTab?.data_source.query).toBe('FROM logs-* | WHERE status == 500');
+    expect(esqlTab).not.toHaveProperty('filters');
   });
 
   it('keeps inline IDs runtime-only and preserves filters for other data views', () => {
@@ -355,12 +366,31 @@ describe('Discover session state adapter', () => {
     expect(mockedUuidv4).toHaveBeenCalledTimes(2);
   });
 
-  it('recreates alias metadata when the requested ID resolves to another session ID', () => {
-    const session = fromDiscoverSessionApiResponse(response, 'legacy-alias');
+  it('maps alias resolution metadata into the runtime session', () => {
+    const session = fromDiscoverSessionApiResponse(response, {
+      outcome: 'aliasMatch',
+      aliasTargetId: 'session-id',
+      aliasPurpose: 'savedObjectConversion',
+    });
 
     expect(session.sharingSavedObjectProps).toEqual({
       outcome: 'aliasMatch',
       aliasTargetId: 'session-id',
+      aliasPurpose: 'savedObjectConversion',
+    });
+  });
+
+  it('maps conflict resolution metadata into the runtime session', () => {
+    const session = fromDiscoverSessionApiResponse(response, {
+      outcome: 'conflict',
+      aliasTargetId: 'other-session',
+      aliasPurpose: 'savedObjectImport',
+    });
+
+    expect(session.sharingSavedObjectProps).toEqual({
+      outcome: 'conflict',
+      aliasTargetId: 'other-session',
+      aliasPurpose: 'savedObjectImport',
     });
   });
 

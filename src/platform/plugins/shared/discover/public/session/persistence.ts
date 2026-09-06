@@ -21,10 +21,19 @@ type LegacyDiscoverSessionClient = Pick<
   'getDiscoverSession' | 'saveDiscoverSession'
 >;
 
-// This temporary contract matches the legacy client so Discover can switch persistence paths
-// without changing its save flow. Replace these legacy types when the legacy path is removed.
+type DiscoverSessionLoadWarning = NonNullable<
+  Awaited<ReturnType<DiscoverSessionClient['get']>>['warnings']
+>[number];
+
+export interface DiscoverSessionLoadResult {
+  session: DiscoverSession;
+  warnings: DiscoverSessionLoadWarning[];
+}
+
+// This temporary contract keeps the legacy save types while Discover switches persistence paths.
+// Replace those types when the legacy path is removed.
 export interface DiscoverSessionPersistence {
-  get: (id: string) => Promise<DiscoverSession>;
+  get: (id: string) => Promise<DiscoverSessionLoadResult>;
   save: (
     session: SaveDiscoverSessionParams,
     options: SaveDiscoverSessionOptions
@@ -43,7 +52,10 @@ export const createDiscoverSessionPersistence = ({
 }): DiscoverSessionPersistence => {
   if (!useHttpApi) {
     return {
-      get: (id) => legacyClient.getDiscoverSession(id),
+      get: async (id) => ({
+        session: await legacyClient.getDiscoverSession(id),
+        warnings: [],
+      }),
       save: (session, options) => legacyClient.saveDiscoverSession(session, options),
     };
   }
@@ -51,7 +63,10 @@ export const createDiscoverSessionPersistence = ({
   return {
     get: async (id) => {
       const response = await apiClient.get(id);
-      return fromDiscoverSessionApiResponse(response, id);
+      return {
+        session: fromDiscoverSessionApiResponse(response, response.resolve),
+        warnings: response.warnings ?? [],
+      };
     },
     save: async (session, options) => {
       const data = toDiscoverSessionApiData(session);

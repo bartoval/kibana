@@ -10,7 +10,7 @@
 import { buildPath, isHttpFetchError } from '@kbn/core-http-browser';
 import type { HttpStart } from '@kbn/core/public';
 import { SavedObjectNotFound } from '@kbn/kibana-utils-plugin/public';
-import { SavedSearchType } from '@kbn/saved-search-plugin/common';
+import { SavedSearchType, type DiscoverSession } from '@kbn/saved-search-plugin/common';
 import {
   DISCOVER_SESSION_API_BASE_PATH,
   DISCOVER_SESSION_API_VERSION,
@@ -23,9 +23,18 @@ import type {
 
 export interface DiscoverSessionClient {
   create: (data: DiscoverSessionApiDataInput) => Promise<DiscoverSessionApiResponse>;
-  get: (id: string) => Promise<DiscoverSessionGetResponse>;
+  get: (id: string) => Promise<DiscoverSessionGetResult>;
   upsert: (id: string, data: DiscoverSessionApiDataInput) => Promise<DiscoverSessionApiResponse>;
 }
+
+type DiscoverSessionResolve = Pick<
+  NonNullable<DiscoverSession['sharingSavedObjectProps']>,
+  'outcome' | 'aliasTargetId' | 'aliasPurpose'
+>;
+
+type DiscoverSessionGetResult = DiscoverSessionGetResponse & {
+  resolve: DiscoverSessionResolve;
+};
 
 /** Creates the browser client used by Discover's core session flows. */
 export const createDiscoverSessionClient = (http: HttpStart): DiscoverSessionClient => ({
@@ -39,10 +48,24 @@ export const createDiscoverSessionClient = (http: HttpStart): DiscoverSessionCli
 
   get: (id) =>
     requestWithReadableError(
-      () =>
-        http.get<DiscoverSessionGetResponse>(buildDiscoverSessionPath(id), {
-          version: DISCOVER_SESSION_API_VERSION,
-        }),
+      async () => {
+        const { body, response } = await http.get<DiscoverSessionGetResponse>(
+          buildDiscoverSessionPath(id),
+          {
+            version: DISCOVER_SESSION_API_VERSION,
+            asResponse: true,
+          }
+        );
+
+        return {
+          ...body,
+          resolve: {
+            outcome: response?.headers.get('kbn-resolve-outcome') ?? undefined,
+            aliasTargetId: response?.headers.get('kbn-resolve-alias-target-id') ?? undefined,
+            aliasPurpose: response?.headers.get('kbn-resolve-purpose') ?? undefined,
+          },
+        } as DiscoverSessionGetResult;
+      },
       () => new SavedObjectNotFound({ type: SavedSearchType, id })
     ),
 

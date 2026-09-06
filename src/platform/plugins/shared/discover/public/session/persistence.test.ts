@@ -17,7 +17,8 @@ import { savedSearchPluginMock } from '@kbn/saved-search-plugin/public/mocks';
 import type { DiscoverSessionClient } from './api_client';
 import { createDiscoverSessionPersistence } from './persistence';
 
-type ApiResponse = Awaited<ReturnType<DiscoverSessionClient['get']>>;
+type ApiResponse = Awaited<ReturnType<DiscoverSessionClient['create']>>;
+type ApiGetResponse = Awaited<ReturnType<DiscoverSessionClient['get']>>;
 
 const runtimeTab: DiscoverSessionTab = {
   id: 'logs-tab',
@@ -56,6 +57,23 @@ const apiResponse: ApiResponse = {
   meta: { managed: false },
 };
 
+const apiGetResponse: ApiGetResponse = {
+  ...apiResponse,
+  resolve: {
+    outcome: 'conflict',
+    aliasTargetId: 'other-session',
+    aliasPurpose: 'savedObjectConversion',
+  },
+  warnings: [
+    {
+      type: 'dropped_property',
+      tab_id: 'logs-tab',
+      key: 'control_panels',
+      message: 'Unable to transform control panels.',
+    },
+  ],
+};
+
 const session: SaveDiscoverSessionParams = {
   id: 'session-id',
   title: 'Session',
@@ -78,7 +96,7 @@ describe('Discover session persistence', () => {
       useHttpApi: true,
     });
 
-    const loadedSession = await persistence.get('session-id');
+    const loaded = await persistence.get('session-id');
     const savedSession = await persistence.save(session, { copyOnSave: false });
 
     expect(apiClient.get).toHaveBeenCalledWith('session-id');
@@ -86,7 +104,8 @@ describe('Discover session persistence', () => {
     expect(apiClient.create).not.toHaveBeenCalled();
     expect(legacyClient.getDiscoverSession).not.toHaveBeenCalled();
     expect(legacyClient.saveDiscoverSession).not.toHaveBeenCalled();
-    expect(loadedSession).toEqual(savedSession);
+    expect(loaded.session.sharingSavedObjectProps).toEqual(apiGetResponse.resolve);
+    expect(loaded.warnings).toEqual(apiGetResponse.warnings);
     expect(savedSession).toEqual(
       expect.objectContaining({
         id: 'session-id',
@@ -129,7 +148,7 @@ describe('Discover session persistence', () => {
       useHttpApi: false,
     });
 
-    const loadedSession = await persistence.get('session-id');
+    const loaded = await persistence.get('session-id');
     const savedSession = await persistence.save(session, { copyOnSave: false });
 
     expect(legacyClient.getDiscoverSession).toHaveBeenCalledWith('session-id');
@@ -138,13 +157,13 @@ describe('Discover session persistence', () => {
     });
     expect(apiClient.get).not.toHaveBeenCalled();
     expect(apiClient.upsert).not.toHaveBeenCalled();
-    expect(loadedSession).toBe(persistedSession);
+    expect(loaded).toEqual({ session: persistedSession, warnings: [] });
     expect(savedSession).toBe(persistedSession);
   });
 });
 
 const createApiClient = (): jest.Mocked<DiscoverSessionClient> => ({
   create: jest.fn().mockResolvedValue(apiResponse),
-  get: jest.fn().mockResolvedValue(apiResponse),
+  get: jest.fn().mockResolvedValue(apiGetResponse),
   upsert: jest.fn().mockResolvedValue(apiResponse),
 });
