@@ -56,7 +56,7 @@ import { createBrowserHistory } from 'history';
 import { cpsPluginMock } from '@kbn/cps/public/mocks';
 import type { DiscoverSessionPersistence } from '../session';
 
-export type DiscoverServicesMock = Omit<DiscoverServices, 'discoverSessionPersistence'> & {
+type DiscoverServicesMock = Omit<DiscoverServices, 'discoverSessionPersistence'> & {
   discoverSessionPersistence: jest.Mocked<DiscoverSessionPersistence>;
 };
 

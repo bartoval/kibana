@@ -19,22 +19,25 @@ type RuntimeControlPanel = ControlPanelsState<OptionsListESQLControlState>[strin
 
 // TODO: Move this mapping to a shared Discover module when the client and server use common
 // session types. Keep both implementations aligned until then.
-/** Converts API controls into the JSON shape used by Discover runtime state. */
+/** Converts API controls to runtime JSON, using supplied order numbers or array positions. */
 export const toControlGroupJson = (
-  controlPanels: ApiControlPanels | undefined
+  controlPanels: ApiControlPanels | undefined,
+  runtimeOrders?: number[]
 ): string | undefined => {
   if (!controlPanels?.length) {
     return undefined;
   }
 
-  return JSON.stringify(
-    Object.fromEntries(
-      controlPanels.map(({ id, type, width, grow, config }, order) => [
-        id,
-        { order, type, width, grow, ...config },
-      ])
-    )
-  );
+  const runtimePanels: ControlPanelsState<OptionsListESQLControlState> = {};
+
+  for (const [index, apiPanel] of controlPanels.entries()) {
+    const { id, type, width, grow, config } = apiPanel;
+    const order = runtimeOrders?.[index] ?? index;
+
+    runtimePanels[id] = { order, type, width, grow, ...config };
+  }
+
+  return JSON.stringify(runtimePanels);
 };
 
 /** Converts Discover runtime controls into the API array shape. */
@@ -45,11 +48,8 @@ export const toApiControlPanels = (
     return undefined;
   }
 
-  const controlGroup = parseRuntimeControlGroup(controlGroupJson);
-  const panels = Object.entries(controlGroup)
-    .map(([id, panel]) => [id, parseControlPanel(id, panel)] as const)
-    .sort(([, panelA], [, panelB]) => panelA.order - panelB.order)
-    .map(([id, panel]): ApiControlPanels[number] => {
+  const panels = parseOrderedControlPanels(controlGroupJson).map(
+    ({ id, panel }): ApiControlPanels[number] => {
       const { order: _order, type, id: _panelId, width, grow, ...config } = panel;
       const snakeCasedConfig = convertCamelCasedKeysToSnakeCase(config);
 
@@ -64,9 +64,27 @@ export const toApiControlPanels = (
         grow,
         config: snakeCasedConfig,
       };
-    });
+    }
+  );
 
   return panels.length > 0 ? panels : undefined;
+};
+
+/** Reads runtime controls, checks their order and type, and sorts them by display order. */
+export const parseOrderedControlPanels = (
+  controlGroupJson: string | undefined
+): Array<{ id: string; panel: RuntimeControlPanel }> => {
+  if (!controlGroupJson) {
+    return [];
+  }
+
+  const controlGroup = parseRuntimeControlGroup(controlGroupJson);
+  const panels = Object.entries(controlGroup).map(([id, panel]) => ({
+    id,
+    panel: parseControlPanel(id, panel),
+  }));
+
+  return panels.sort((first, second) => first.panel.order - second.panel.order);
 };
 
 /** Parses runtime control state and fails instead of silently omitting invalid controls. */
@@ -86,7 +104,7 @@ const parseRuntimeControlGroup = (controlGroupJson: string): Record<string, unkn
   return parsed;
 };
 
-/** Validates the panel fields needed before converting the rest through the API schema. */
+/** Checks the panel's order and type; the API validates the remaining configuration on save. */
 const parseControlPanel = (id: string, panel: unknown): RuntimeControlPanel => {
   if (!isRecord(panel)) {
     throw new Error(`Unable to save the Discover session: control panel [${id}] must be an object`);

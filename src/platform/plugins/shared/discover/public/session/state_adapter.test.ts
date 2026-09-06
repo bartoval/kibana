@@ -212,10 +212,75 @@ describe('Discover session state adapter', () => {
     });
   });
 
+  it.each([
+    { label: 'unchanged', ids: ['first', 'last'], expectedOrders: [0, 2] },
+    { label: 'reordered', ids: ['last', 'first'], expectedOrders: [0, 1] },
+  ])(
+    'uses the correct runtime orders for $label controls after saving',
+    ({ ids, expectedOrders }) => {
+      const apiControls: NonNullable<ApiTab['control_panels']> = ids.map((id) => ({
+        id,
+        type: ESQL_CONTROL,
+        width: CONTROL_WIDTH_MEDIUM,
+        grow: true,
+        config: {
+          control_type: 'STATIC_VALUES',
+          available_options: ['api', 'web'],
+          selected_options: ['web'],
+          single_select: true,
+          variable_name: id,
+          variable_type: 'values',
+        },
+      }));
+      const saveResponse: ApiResponse = {
+        ...response,
+        data: {
+          ...response.data,
+          tabs: [{ ...response.data.tabs[2], control_panels: apiControls }],
+        },
+      };
+      const previousTab = fromDiscoverSessionApiResponse(saveResponse).tabs[0];
+      previousTab.controlGroupJson = JSON.stringify(
+        Object.fromEntries(
+          apiControls.map(({ id, type, width, grow, config }) => [
+            id,
+            {
+              type,
+              width,
+              grow,
+              ...config,
+              selected_options: ['api'],
+              order: id === 'first' ? 0 : 2,
+            },
+          ])
+        )
+      );
+
+      const session = fromDiscoverSessionApiResponse(saveResponse, undefined, [previousTab]);
+
+      expect(JSON.parse(session.tabs[0].controlGroupJson ?? '{}')).toEqual(
+        Object.fromEntries(
+          apiControls.map(({ id, type, width, grow, config }, index) => [
+            id,
+            { type, width, grow, ...config, order: expectedOrders[index] },
+          ])
+        )
+      );
+    }
+  );
+
   it('round-trips the complete API document', () => {
     const session = fromDiscoverSessionApiResponse(response);
 
-    expect(toDiscoverSessionApiData(session)).toEqual(response.data);
+    const expectedInlineTab = {
+      ...inlineApiTab,
+      filters: inlineApiTab.filters.map((filter) => ({ ...filter, disabled: false })),
+    };
+
+    expect(toDiscoverSessionApiData(session)).toEqual({
+      ...response.data,
+      tabs: [response.data.tabs[0], expectedInlineTab, response.data.tabs[2]],
+    });
   });
 
   it('round-trips ES|QL filtering as part of the query', () => {

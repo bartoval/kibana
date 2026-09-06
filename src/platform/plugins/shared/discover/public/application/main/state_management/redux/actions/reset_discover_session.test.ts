@@ -199,12 +199,26 @@ describe('resetDiscoverSession', () => {
     expect(refetchedTab.forceFetchOnSelect).toBe(false);
   });
 
-  it('should preserve global filters when applying a save response', async () => {
+  it('should not copy a persisted global filter into app state', async () => {
     const { internalState, persistedTab1, persistedDiscoverSession } = await setup();
     const pinnedFilter = {
       meta: { index: dataViewWithTimefieldMock.id },
       query: { match_all: {} },
       $state: { store: FilterStateStore.GLOBAL_STATE },
+    };
+    const legacySaveResponse = {
+      ...persistedDiscoverSession,
+      tabs: persistedDiscoverSession.tabs.map((tab) =>
+        tab.id === persistedTab1.id
+          ? {
+              ...tab,
+              serializedSearchSource: {
+                ...tab.serializedSearchSource,
+                filter: [pinnedFilter],
+              },
+            }
+          : tab
+      ),
     };
 
     internalState.dispatch(
@@ -216,15 +230,14 @@ describe('resetDiscoverSession', () => {
 
     await internalState
       .dispatch(
-        internalStateActions.resetDiscoverSession({
-          updatedDiscoverSession: cloneDeep(persistedDiscoverSession),
-        })
+        internalStateActions.resetDiscoverSession({ updatedDiscoverSession: legacySaveResponse })
       )
       .unwrap();
 
-    expect(selectTab(internalState.getState(), persistedTab1.id).globalState.filters).toEqual([
-      pinnedFilter,
-    ]);
+    const tab = selectTab(internalState.getState(), persistedTab1.id);
+    const allFilters = [...(tab.globalState.filters ?? []), ...(tab.appState.filters ?? [])];
+
+    expect(allFilters).toEqual([pinnedFilter]);
   });
 
   it('should keep current tab runtime state available while replacing all session tabs', async () => {

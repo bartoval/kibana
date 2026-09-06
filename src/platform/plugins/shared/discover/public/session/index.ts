@@ -9,9 +9,4 @@
 
 export { createDiscoverSessionClient, type DiscoverSessionClient } from './api_client';
 export { loadDiscoverSession } from './load_discover_session';
-export {
-  createDiscoverSessionPersistence,
-  type DiscoverSessionLoadResult,
-  type DiscoverSessionPersistence,
-} from './persistence';
-export { fromDiscoverSessionApiResponse, toDiscoverSessionApiData } from './state_adapter';
+export { createDiscoverSessionPersistence, type DiscoverSessionPersistence } from './persistence';

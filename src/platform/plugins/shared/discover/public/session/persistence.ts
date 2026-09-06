@@ -25,7 +25,7 @@ type DiscoverSessionLoadWarning = NonNullable<
   Awaited<ReturnType<DiscoverSessionClient['get']>>['warnings']
 >[number];
 
-export interface DiscoverSessionLoadResult {
+interface DiscoverSessionLoadResult {
   session: DiscoverSession;
   warnings: DiscoverSessionLoadWarning[];
 }
@@ -40,7 +40,7 @@ export interface DiscoverSessionPersistence {
   ) => Promise<DiscoverSession | undefined>;
 }
 
-/** Selects the REST or legacy persistence path for every core Discover session operation. */
+/** Selects the REST or legacy path for loading and saving Discover sessions. */
 export const createDiscoverSessionPersistence = ({
   apiClient,
   legacyClient,

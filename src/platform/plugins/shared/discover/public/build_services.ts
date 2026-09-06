@@ -88,7 +88,7 @@ import {
 } from './session';
 
 // Enable locally while testing the REST persistence path. Keep disabled in shared branches.
-const USE_DISCOVER_SESSION_HTTP_API = false;
+const USE_DISCOVER_SESSION_HTTP_API = true;
 
 /**
  * Location state of internal Discover history instance
