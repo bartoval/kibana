@@ -51,8 +51,6 @@ export type {
   DiscoverSessionEmbeddableByReferenceState,
   DiscoverSessionEmbeddableState,
 } from './embeddable';
-export { discoverSessionApiResponseSchema } from './api/schema';
-export { transformDiscoverSessionIn, transformDiscoverSessionOut } from './api/transforms';
 export type {
   DiscoverSessionApiResponse,
   DiscoverSessionApiData,

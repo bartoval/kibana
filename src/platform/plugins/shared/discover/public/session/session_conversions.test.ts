@@ -35,6 +35,7 @@ import {
   getDiscoverSessionReferences,
   toDiscoverSessionApiData,
 } from './session_conversions';
+import { fromApiTabToSearchAndTableState } from '../../common/session/search_and_table_mapping';
 
 type ApiInlineDataView = Extract<
   DiscoverSessionApiClassicTab['data_source'],
@@ -86,7 +87,7 @@ const esqlApiTab: Required<DiscoverSessionApiEsqlTab> = {
   column_settings: { message: { width: 320 } },
   data_source: { type: 'esql', query: 'FROM logs-* | WHERE status == 500' },
   hide_chart: false,
-  hide_table: false,
+  hide_table: true,
   hide_aggregated_preview: true,
   row_height: 2,
   header_row_height: 'auto',
@@ -178,10 +179,22 @@ describe('Discover session conversion and UI preparation', () => {
 
   it('converts API fields without assigning inline IDs or binding filters', () => {
     const originalResponse = cloneDeep(response);
+    const { serializedSearchSource, ...tabFields } = fromApiTabToSearchAndTableState(
+      response.data.tabs[0]
+    );
+    expect(tabFields).not.toHaveProperty('kibanaSavedObjectMeta');
+    expect(tabFields).not.toHaveProperty('hideChart');
+    expect(tabFields).not.toHaveProperty('hideTable');
+    expect(serializedSearchSource.index).toBe('logs-data-view');
+    expect(serializedSearchSource).not.toHaveProperty('indexRefName');
 
     const session = fromDiscoverSessionApiResponse(response);
 
     expect(session.tabs[0].visContext).toBeUndefined();
+    expect(session.tabs[1].hideChart).toBe(true);
+    expect(session.tabs[2].hideTable).toBe(true);
+    expect(session.tabs[0]).not.toHaveProperty('kibanaSavedObjectMeta');
+    expect(session.references).toStrictEqual(getDiscoverSessionReferences(response.data));
     expect(session.tabs[0]).not.toHaveProperty('tabTypeState');
     expect(session.tabs[2].visContext).toStrictEqual({
       suggestionType: UnifiedHistogramSuggestionType.histogramForESQL,
@@ -406,6 +419,23 @@ describe('Discover session conversion and UI preparation', () => {
     expect(toDiscoverSessionApiData(session)).toStrictEqual(metricsResponse.data);
   });
 
+  it('rejects Metrics settings on a classic tab when building a save request', () => {
+    const session = fromDiscoverSessionApiResponse(response);
+    const [classicTab] = session.tabs;
+    classicTab.tabTypeState = {
+      type: DiscoverTabType.Metrics,
+      dimensions: ['host.name'],
+      searchTerm: 'cpu',
+      counterAggregation: 'max',
+      gaugeAggregation: 'min',
+      histogramPercentile: 'p99',
+    };
+
+    expect(() => toDiscoverSessionApiData(session)).toThrow(
+      `Metrics tab "${classicTab.label}" with ID "${classicTab.id}" requires an ES|QL data source.`
+    );
+  });
+
   it('keeps inline IDs runtime-only and preserves filters for other data views', () => {
     const session = assignSessionDataViewIds(fromDiscoverSessionApiResponse(response), []);
     const inlineTab = session.tabs[1];
@@ -420,11 +450,13 @@ describe('Discover session conversion and UI preparation', () => {
     expect(inlineTab.serializedSearchSource.filter?.[0].meta.index).toBe('runtime-inline-id');
     expect(inlineTab.serializedSearchSource.filter?.[1].meta.index).toBe('foreign-data-view-id');
 
+    const beforeSave = cloneDeep(session);
     const apiTab = toDiscoverSessionApiData(session).tabs[1];
     const filters = 'filters' in apiTab ? apiTab.filters ?? [] : [];
     expect(apiTab.data_source).not.toHaveProperty('id');
     expect(filters[0].data_view_id).toBeUndefined();
     expect(filters[1].data_view_id).toBe('foreign-data-view-id');
+    expect(session).toStrictEqual(beforeSave);
   });
 
   it('round-trips pinned conditions as app filters without changing the local pin', () => {

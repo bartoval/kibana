@@ -15,8 +15,13 @@ import { ESQL_CONTROL } from '@kbn/controls-constants';
 import { injectReferences, parseSearchSourceJSON } from '@kbn/data-plugin/common';
 import { DiscoverTabType, UnifiedHistogramSuggestionType } from '@kbn/discover-session-constants';
 import { FILTERS, FilterStateStore } from '@kbn/es-query';
+import { cloneDeep } from 'lodash';
 import { type DiscoverSessionTabTypeState, VIEW_MODE } from '@kbn/saved-search-plugin/common';
 import { fromStoredTab } from '../../../common/embeddable/transform_utils';
+import {
+  fromSearchAndTableStateToApiFieldsWithSessionPolicies,
+  fromSessionTabToApiFields,
+} from '../../../common/session/session_tab_mapping';
 import {
   discoverSessionApiDataSchema,
   type DiscoverSessionApiClassicTab,
@@ -109,6 +114,44 @@ describe('discover session API transforms', () => {
     },
   };
 
+  it('converts shared tab fields without handling type settings, vis_context, or controls', () => {
+    const [classicTab, metricsTab] = discoverSessionAttributes.tabs;
+    const tab = {
+      ...classicTab,
+      attributes: {
+        ...classicTab.attributes,
+        tabTypeState: metricsTab.attributes.tabTypeState,
+        visContext: metricsTab.attributes.visContext,
+        controlGroupJson: '{', // Invalid JSON: this mapper must leave control parsing to the caller.
+      },
+    };
+    const originalTab = cloneDeep(tab); // Keep a separate copy to catch changes to nested fields.
+    const {
+      type: _type,
+      vis_context: _visContext,
+      control_panels: _controlPanels,
+      ...expectedFields
+    } = discoverSessionApiData.tabs[0];
+
+    const searchSource = parseSearchSourceJSON(
+      tab.attributes.kibanaSavedObjectMeta.searchSourceJSON
+    );
+    const searchAndTableFields = fromSearchAndTableStateToApiFieldsWithSessionPolicies(
+      tab.attributes,
+      searchSource
+    );
+    const sessionFields = fromSessionTabToApiFields(tab.attributes);
+    expect(searchAndTableFields).not.toHaveProperty('hide_chart');
+    expect(sessionFields).not.toHaveProperty('data_source');
+    expect({
+      id: tab.id,
+      label: tab.label,
+      ...searchAndTableFields,
+      ...sessionFields,
+    }).toStrictEqual(expectedFields);
+    expect(tab).toStrictEqual(originalTab);
+  });
+
   describe('transform out', () => {
     it('maps saved object attributes to API data', () => {
       const { sessionState: transformed } = transformDiscoverSessionOut(discoverSessionAttributes);
@@ -132,16 +175,17 @@ describe('discover session API transforms', () => {
           query: { match_phrase: { 'host.name': 'web-01' } },
         },
       ];
+      const storedTabAttributes = {
+        ...classicTab.attributes,
+        kibanaSavedObjectMeta: { searchSourceJSON: JSON.stringify(searchSource) },
+      };
 
       const { sessionState } = transformDiscoverSessionOut({
         ...discoverSessionAttributes,
         tabs: [
           {
             ...classicTab,
-            attributes: {
-              ...classicTab.attributes,
-              kibanaSavedObjectMeta: { searchSourceJSON: JSON.stringify(searchSource) },
-            },
+            attributes: storedTabAttributes,
           },
         ],
       });
@@ -150,6 +194,9 @@ describe('discover session API transforms', () => {
 
       expect(selfFilter).not.toHaveProperty('data_view_id');
       expect(foreignFilter).toHaveProperty('data_view_id', 'foreign-data-view-id');
+      expect(fromStoredTab(storedTabAttributes)).toMatchObject({
+        filters: [{ data_view_id: inlineDataViewId }, { data_view_id: 'foreign-data-view-id' }],
+      });
 
       const { attributes, references } = transformDiscoverSessionIn(sessionState);
       const roundTrippedSearchSource = injectReferences(
