@@ -12,40 +12,29 @@ import type { HttpStart } from '@kbn/core/public';
 import { SavedObjectNotFound } from '@kbn/kibana-utils-plugin/public';
 import { SavedSearchType, type DiscoverSession } from '@kbn/saved-search-plugin/common';
 import {
-  DISCOVER_SESSION_API_BASE_PATH,
+  DISCOVER_SESSION_INTERNAL_API_BASE_PATH,
   DISCOVER_SESSION_API_VERSION,
 } from '../../common/constants';
 import type {
-  DiscoverSessionApiDataInput,
-  DiscoverSessionApiResponse,
-  DiscoverSessionGetResponse,
+  DiscoverSessionInternalData,
+  DiscoverSessionInternalResponse,
+  DiscoverSessionInternalGetResponse,
 } from '../../server';
-import type { deserializeEsqlControls } from '../../common/session/control_panels';
 
 export const DISCOVER_SESSION_HTTP_ERROR_NAME = 'DiscoverSessionHttpError';
 
 export interface DiscoverSessionClient {
-  create: (data: DiscoverSessionRequestData) => Promise<DiscoverSessionApiResponse>;
+  create: (data: DiscoverSessionInternalData) => Promise<DiscoverSessionInternalResponse>;
   get: (id: string) => Promise<DiscoverSessionGetResult>;
-  upsert: (id: string, data: DiscoverSessionRequestData) => Promise<DiscoverSessionApiResponse>;
+  upsert: (id: string, data: DiscoverSessionInternalData) => Promise<DiscoverSessionInternalResponse>;
 }
-
-export type DiscoverSessionRequestData = Omit<DiscoverSessionApiDataInput, 'tabs'> & {
-  tabs: DiscoverSessionRequestTab[];
-};
-
-export type DiscoverSessionRequestTab<Tab = DiscoverSessionApiDataInput['tabs'][number]> = {
-  [Key in keyof Tab]: Key extends 'control_panels'
-    ? ReturnType<typeof deserializeEsqlControls>
-    : Tab[Key];
-};
 
 export type DiscoverSessionResolve = Pick<
   NonNullable<DiscoverSession['sharingSavedObjectProps']>,
   'outcome' | 'aliasTargetId' | 'aliasPurpose'
 >;
 
-export type DiscoverSessionGetResult = DiscoverSessionGetResponse & {
+export type DiscoverSessionGetResult = DiscoverSessionInternalGetResponse & {
   resolve: DiscoverSessionResolve;
 };
 
@@ -53,7 +42,7 @@ export type DiscoverSessionGetResult = DiscoverSessionGetResponse & {
 export const createDiscoverSessionClient = (http: HttpStart): DiscoverSessionClient => ({
   create: (data) =>
     requestWithReadableError(() =>
-      http.post<DiscoverSessionApiResponse>(DISCOVER_SESSION_API_BASE_PATH, {
+      http.post<DiscoverSessionInternalResponse>(DISCOVER_SESSION_INTERNAL_API_BASE_PATH, {
         version: DISCOVER_SESSION_API_VERSION,
         body: JSON.stringify(data),
       })
@@ -62,7 +51,7 @@ export const createDiscoverSessionClient = (http: HttpStart): DiscoverSessionCli
   get: (id) =>
     requestWithReadableError(
       async () => {
-        const { body, response } = await http.get<DiscoverSessionGetResponse>(
+        const { body, response } = await http.get<DiscoverSessionInternalGetResponse>(
           buildDiscoverSessionPath(id),
           {
             version: DISCOVER_SESSION_API_VERSION,
@@ -84,7 +73,7 @@ export const createDiscoverSessionClient = (http: HttpStart): DiscoverSessionCli
 
   upsert: (id, data) =>
     requestWithReadableError(() =>
-      http.put<DiscoverSessionApiResponse>(buildDiscoverSessionPath(id), {
+      http.put<DiscoverSessionInternalResponse>(buildDiscoverSessionPath(id), {
         version: DISCOVER_SESSION_API_VERSION,
         body: JSON.stringify(data),
       })
@@ -94,7 +83,7 @@ export const createDiscoverSessionClient = (http: HttpStart): DiscoverSessionCli
 
 /** Builds the path for one Discover session. */
 const buildDiscoverSessionPath = (id: string) =>
-  buildPath(`${DISCOVER_SESSION_API_BASE_PATH}/{id}`, { id });
+  buildPath(`${DISCOVER_SESSION_INTERNAL_API_BASE_PATH}/{id}`, { id });
 
 /** Preserves server error details while allowing callers to handle missing sessions separately. */
 const requestWithReadableError = async <T>(
