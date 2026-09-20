@@ -10,13 +10,17 @@
 import type { RequestHandlerContext, SavedObject } from '@kbn/core/server';
 import { SavedObjectsErrorHelpers } from '@kbn/core/server';
 import { coreMock } from '@kbn/core/server/mocks';
+import { parseSearchSourceJSON } from '@kbn/data-plugin/common';
 import { SavedSearchType } from '@kbn/saved-search-plugin/common';
 import type { DiscoverSessionAttributes } from '@kbn/saved-search-plugin/server';
 import { discoverSessionApiData } from './transforms/transform_discover_session.fixtures';
 import { transformDiscoverSessionIn } from './transforms';
 import { upsertDiscoverSession } from './session_upsert';
+import { assignStoredInlineDataViewIds } from './transforms/assign_stored_inline_data_view_ids';
 
-const { attributes, references } = transformDiscoverSessionIn(discoverSessionApiData);
+const { attributes: apiAttributes, references } =
+  transformDiscoverSessionIn(discoverSessionApiData);
+const attributes = assignStoredInlineDataViewIds(apiAttributes);
 
 const createSavedObject = (
   id: string,
@@ -84,6 +88,33 @@ describe('upsertDiscoverSession', () => {
     ).rejects.toBe(error);
 
     expect(coreContext.savedObjects.client.update).not.toHaveBeenCalled();
+  });
+
+  it('assigns inline IDs when PUT creates a missing session', async () => {
+    coreContext.savedObjects.client.resolve.mockRejectedValue(
+      SavedObjectsErrorHelpers.createGenericNotFoundError(SavedSearchType, requestId)
+    );
+    const created = createSavedObject(requestId, { created_at: '2026-07-15T12:00:00.000Z' });
+    coreContext.savedObjects.client.update.mockResolvedValue(created);
+    coreContext.savedObjects.client.get.mockResolvedValue(created);
+
+    const result = await upsertDiscoverSession(requestContext, requestId, discoverSessionApiData);
+    const written = coreContext.savedObjects.client.update.mock
+      .calls[0][2] as DiscoverSessionAttributes;
+    const { index } = parseSearchSourceJSON(
+      written.tabs[0].attributes.kibanaSavedObjectMeta.searchSourceJSON
+    );
+
+    expect(index).toEqual(expect.objectContaining({ id: expect.any(String) }));
+    expect(coreContext.savedObjects.client.update).toHaveBeenCalledWith(
+      SavedSearchType,
+      requestId,
+      written,
+      { upsert: written, references, mergeAttributes: false }
+    );
+    expect(coreContext.savedObjects.client.resolve).toHaveBeenCalledTimes(1);
+    expect(result.operation).toBe('create');
+    expect(result.body.data.tabs[0].data_source).not.toHaveProperty('id');
   });
 
   it('updates the target of a legacy URL alias', async () => {

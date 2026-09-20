@@ -9,11 +9,12 @@
 
 import { asCodeIdSchema, getMeta } from '@kbn/as-code-shared-schemas';
 import type { RequestHandlerContext } from '@kbn/core/server';
-import { SavedObjectsErrorHelpers } from '@kbn/core/server';
+import { isSavedObjectErrorResult, SavedObjectsErrorHelpers } from '@kbn/core/server';
 import { SavedSearchType } from '@kbn/saved-search-plugin/common';
 import type { DiscoverSessionAttributes } from '@kbn/saved-search-plugin/server';
 import type { DiscoverSessionApiData, DiscoverSessionApiResponse } from './schema';
 import { transformDiscoverSessionIn, transformDiscoverSessionOut } from './transforms';
+import { assignStoredInlineDataViewIds } from './transforms/assign_stored_inline_data_view_ids';
 
 export const upsertDiscoverSession = async (
   requestContext: RequestHandlerContext,
@@ -26,6 +27,7 @@ export const upsertDiscoverSession = async (
   const { core } = await requestContext.resolve(['core']);
   const { attributes, references } = transformDiscoverSessionIn(data);
   let resolvedId = id;
+  let existingAttributes: DiscoverSessionAttributes | undefined;
 
   // Check whether the session exists (standard or legacy) so the ID is validated only when creating it.
   try {
@@ -39,6 +41,10 @@ export const upsertDiscoverSession = async (
     }
 
     resolvedId = result.saved_object.id;
+    // resolve throws on failure, but its return type also includes bulk error results.
+    if (!isSavedObjectErrorResult(result.saved_object)) {
+      existingAttributes = result.saved_object.attributes;
+    }
   } catch (error) {
     // Only a missing session indicates creation; propagate all other lookup errors.
     if (!SavedObjectsErrorHelpers.isNotFoundError(error)) {
@@ -49,12 +55,13 @@ export const upsertDiscoverSession = async (
     asCodeIdSchema.parse(id);
   }
 
+  const storedAttributes = assignStoredInlineDataViewIds(attributes, existingAttributes);
   const updateResponse = await core.savedObjects.client.update<DiscoverSessionAttributes>(
     SavedSearchType,
     resolvedId,
-    attributes,
+    storedAttributes,
     {
-      upsert: attributes,
+      upsert: storedAttributes,
       references,
       mergeAttributes: false,
     }
