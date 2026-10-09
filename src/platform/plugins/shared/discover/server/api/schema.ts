@@ -41,6 +41,15 @@ const discoverSessionDroppedPanelWarningSchema = discoverSessionWarningBaseSchem
   .extend({
     type: z.literal('dropped_panel'),
     panel_id: z.string().meta({ description: 'The ID of the omitted control panel.' }),
+    panel_type: z
+      .string()
+      .optional()
+      .meta({ description: 'The type identifier of the omitted control panel.' }),
+    panel_config: z
+      .object({})
+      .loose()
+      .optional()
+      .meta({ description: 'The original configuration of the omitted control panel.' }),
   })
   .strict();
 
@@ -49,6 +58,10 @@ const discoverSessionDroppedPropertyWarningSchema = discoverSessionWarningBaseSc
   .extend({
     type: z.literal('dropped_property'),
     key: z.string().meta({ description: 'The name of the property omitted from the response.' }),
+    value: z
+      .unknown()
+      .optional()
+      .meta({ description: 'The original value of the property omitted from the response.' }),
   })
   .strict();
 

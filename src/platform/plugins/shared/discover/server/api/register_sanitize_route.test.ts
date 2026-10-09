@@ -116,6 +116,7 @@ describe('registerSanitizeRoute', () => {
         type: 'dropped_property',
         tab_id: firstTab.id,
         key: 'control_panels',
+        value: 'not-json',
         message: expect.stringContaining('controlGroupJson is not valid JSON'),
       },
     ]);
