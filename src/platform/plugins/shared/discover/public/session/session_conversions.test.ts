@@ -198,11 +198,7 @@ describe('Discover session conversion and UI preparation', () => {
     expect(session.tabs[2].visContext).toStrictEqual({
       suggestionType: UnifiedHistogramSuggestionType.histogramForESQL,
       attributes: response.data.tabs[2].vis_context?.attributes,
-      requestData: {
-        dataViewId: 'esql-data-view',
-        timeField: '@timestamp',
-        breakdownField: 'service.name',
-      },
+      requestData: {},
     });
     expect(session.tabs[1].serializedSearchSource.index).not.toHaveProperty('id');
     expect(session.tabs[1].serializedSearchSource.filter?.[0].meta.index).toBeUndefined();
@@ -240,11 +236,7 @@ describe('Discover session conversion and UI preparation', () => {
     expect(session.tabs[2].visContext).toEqual(
       expect.objectContaining({
         suggestionType: UnifiedHistogramSuggestionType.histogramForESQL,
-        requestData: {
-          dataViewId: 'esql-data-view',
-          timeField: '@timestamp',
-          breakdownField: 'service.name',
-        },
+        requestData: {},
       })
     );
     expect(JSON.parse(session.tabs[2].controlGroupJson ?? '{}')).toEqual({
@@ -299,18 +291,14 @@ describe('Discover session conversion and UI preparation', () => {
     expect(tab.visContext).toStrictEqual({
       suggestionType: UnifiedHistogramSuggestionType.histogramForDataView,
       attributes: { visualizationType: 'lnsXY' },
-      requestData: {
-        dataViewId: 'stored-inline-id',
-        timeField: '@timestamp',
-        timeInterval: 'h',
-      },
+      requestData: {},
     });
     expect(assignSessionDataViewIds(session, [])).toBe(session);
     expect(mockedUuidv4).not.toHaveBeenCalled();
     expect(data).toStrictEqual(originalData);
   });
 
-  it('restores an ES|QL chart fingerprint on a classic tab without inheriting its interval', () => {
+  it('preserves a dormant ES|QL chart on a classic tab without rebuilding its fingerprint', () => {
     const classicTab: DiscoverSessionApiClassicTab = {
       ...inlineApiTab,
       data_source: { type: 'data_view_reference', ref_id: 'logs-data-view' },
@@ -319,7 +307,6 @@ describe('Discover session conversion and UI preparation', () => {
       vis_context: response.data.tabs[2].vis_context,
     };
 
-    // Load without previous runtime state: the chart must carry its own ES|QL fingerprint.
     const session = fromDiscoverSessionApiResponse({
       ...response,
       data: { ...response.data, tabs: [classicTab] },
@@ -328,15 +315,11 @@ describe('Discover session conversion and UI preparation', () => {
     expect(session.tabs[0].visContext).toEqual({
       suggestionType: UnifiedHistogramSuggestionType.histogramForESQL,
       attributes: classicTab.vis_context?.attributes,
-      requestData: {
-        dataViewId: 'esql-data-view',
-        timeField: '@timestamp',
-        breakdownField: 'service.name',
-      },
+      requestData: {},
     });
   });
 
-  it('preserves a classic chart with the fallback fingerprint from the tab', () => {
+  it('preserves a classic chart without deriving a fingerprint from the tab', () => {
     const classicTab: DiscoverSessionApiClassicTab = {
       ...inlineApiTab,
       data_source: { type: 'data_view_reference', ref_id: 'logs-data-view' },
@@ -357,11 +340,7 @@ describe('Discover session conversion and UI preparation', () => {
     expect(session.tabs[0].visContext).toStrictEqual({
       suggestionType: UnifiedHistogramSuggestionType.histogramForDataView,
       attributes: classicTab.vis_context?.attributes,
-      requestData: {
-        dataViewId: 'logs-data-view',
-        timeInterval: 'h',
-        breakdownField: 'service.name',
-      },
+      requestData: {},
     });
     expect(fromDiscoverSessionApiResponse(chartResponse).tabs[0].visContext).toStrictEqual(
       session.tabs[0].visContext
@@ -878,7 +857,7 @@ describe('chart state from API responses', () => {
   it.each([
     UnifiedHistogramSuggestionType.histogramForESQL,
     UnifiedHistogramSuggestionType.lensSuggestion,
-  ] as const)('assembles %s with the extracted fingerprint and breakdown', (suggestionType) => {
+  ] as const)('assembles %s without extracting a fingerprint', (suggestionType) => {
     const visContext = createVisContext({
       suggestionType,
       layers: { 'layer-1': { index: 'esql-dv' } },
@@ -890,11 +869,7 @@ describe('chart state from API responses', () => {
     ).toStrictEqual({
       suggestionType,
       attributes: visContext.attributes,
-      requestData: {
-        dataViewId: 'esql-dv',
-        timeField: '@timestamp',
-        breakdownField: 'host.name',
-      },
+      requestData: {},
     });
   });
 
@@ -909,11 +884,11 @@ describe('chart state from API responses', () => {
     ).toStrictEqual({
       suggestionType: visContext.suggestion_type,
       attributes: visContext.attributes,
-      requestData: { dataViewId: 'esql-dv', timeField: '@timestamp' },
+      requestData: {},
     });
   });
 
-  it('uses the tab breakdown without adding a classic interval to an ES|QL fallback', () => {
+  it('preserves opaque chart attributes without deriving a fallback fingerprint', () => {
     const visContext: ApiVisContext = {
       suggestion_type: UnifiedHistogramSuggestionType.histogramForESQL,
       attributes: { visualizationType: 'lnsXY', state: { foo: 'bar' } },
@@ -928,11 +903,11 @@ describe('chart state from API responses', () => {
     ).toStrictEqual({
       suggestionType: visContext.suggestion_type,
       attributes: visContext.attributes,
-      requestData: { breakdownField: 'host.name' },
+      requestData: {},
     });
   });
 
-  it('uses the inline time field and classic interval without inventing a data view ID', () => {
+  it('does not derive a chart fingerprint from inline data view settings', () => {
     const visContext: ApiVisContext = {
       suggestion_type: UnifiedHistogramSuggestionType.histogramForDataView,
       attributes: { visualizationType: 'lnsXY' },
@@ -959,7 +934,7 @@ describe('chart state from API responses', () => {
     ).toStrictEqual({
       suggestionType: visContext.suggestion_type,
       attributes: visContext.attributes,
-      requestData: { timeField: '@timestamp', timeInterval: 'h' },
+      requestData: {},
     });
   });
 
