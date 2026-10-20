@@ -7,8 +7,13 @@
  * License v3.0 only", or the "Server Side Public License, v 1".
  */
 import { uniqBy } from 'lodash';
-import { isSubQuery } from '@elastic/esql';
-import type { ESQLCommand, ESQLAstQueryExpression } from '@elastic/esql/types';
+import { isSource, isSubQuery } from '@elastic/esql';
+import type { ESQLCommand, ESQLAstQueryExpression, ESQLSource } from '@elastic/esql/types';
+import {
+  findNamedSubqueryForSource,
+  getNamedSubqueriesBefore,
+  type NamedSubquery,
+} from '../../definitions/utils/named_subqueries';
 import { esqlCommandRegistry } from '..';
 import type { ESQLColumnData } from '../types';
 import { UnmappedFieldsStrategy } from '../types';
@@ -22,8 +27,19 @@ export const columnsAfter = async (
   unmappedFieldsStrategy: UnmappedFieldsStrategy = UnmappedFieldsStrategy.DEFAULT
 ) => {
   const options = command.args.filter((arg) => !Array.isArray(arg) && arg.type === 'option');
-  const sources = command.args.filter((arg) => !Array.isArray(arg) && arg.type === 'source');
   const subqueries = command.args.filter(isSubQuery);
+  const namedSubqueries = additionalFields.namedSubqueries ?? [];
+
+  const sources: ESQLSource[] = [];
+  const referencedNamedSubqueries: NamedSubquery[] = [];
+  for (const source of command.args.filter(isSource)) {
+    const namedSubquery = findNamedSubqueryForSource(source, namedSubqueries);
+    if (namedSubquery) {
+      referencedNamedSubqueries.push(namedSubquery);
+    } else {
+      sources.push(source);
+    }
+  }
 
   const promises: Array<Promise<ESQLColumnData[]>> = [];
 
@@ -35,6 +51,21 @@ export const columnsAfter = async (
 
   for (const subquery of subqueries) {
     promises.push(processSubquery(subquery.child, query, additionalFields, unmappedFieldsStrategy));
+  }
+
+  // A named subquery body only sees the bindings declared before it.
+  for (const namedSubquery of referencedNamedSubqueries) {
+    promises.push(
+      processSubquery(
+        namedSubquery.query,
+        query,
+        {
+          ...additionalFields,
+          namedSubqueries: getNamedSubqueriesBefore(namedSubqueries, namedSubquery.command),
+        },
+        unmappedFieldsStrategy
+      )
+    );
   }
 
   const results = await Promise.all(promises);

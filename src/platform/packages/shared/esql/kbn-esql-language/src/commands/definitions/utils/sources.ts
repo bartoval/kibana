@@ -26,6 +26,7 @@ import { metadataSuggestion } from '../../registry/options/metadata';
 import { fuzzySearch } from './shared';
 import { computePrefixRange } from '../../../language/autocomplete/utils/prefix_range';
 import { COORDINATOR_LOOKUP_JOIN_PREFIX } from '../constants';
+import { getNamedSubqueries, resolveNamedSubquerySources } from './named_subqueries';
 
 export const removeSourceNameQuotes = (sourceName: string) =>
   sourceName.startsWith('"') && sourceName.endsWith('"') ? sourceName.slice(1, -1) : sourceName;
@@ -120,6 +121,7 @@ export const buildSourcesDefinitions = (
     const kindByType = new Map<string, ISuggestionItem['kind']>([
       [SOURCES_TYPES.WIRED_STREAM, 'Folder'],
       [SOURCES_TYPES.CLASSIC_STREAM, 'Class'],
+      [SOURCES_TYPES.NAMED_SUBQUERY, 'Variable'],
     ]);
 
     const kind: ISuggestionItem['kind'] =
@@ -252,7 +254,10 @@ export async function hasWiredStreamsInQuery(
 
   // Parse the query to get the sources used in the query.
   const esqlQuery = EsqlQuery.fromSrc(query);
-  const sourcesInQuery = getSourcesFromCommands(esqlQuery.ast.commands, 'index');
+  const sourcesInQuery = resolveNamedSubquerySources(
+    getSourcesFromCommands(esqlQuery.ast.commands, 'index'),
+    getNamedSubqueries(esqlQuery.ast.header)
+  );
   if (sourcesInQuery.length === 0) {
     return false;
   }
@@ -431,7 +436,10 @@ export const getLookupJoinSource = (command: ESQLAstJoinCommand): string | undef
 export function getIndexSourcesFromQuery(query: string): string[] {
   try {
     const { root } = Parser.parse(query);
-    return getSourcesFromCommands(root.commands, 'index').map(({ name }) => name);
+    return resolveNamedSubquerySources(
+      getSourcesFromCommands(root.commands, 'index'),
+      getNamedSubqueries(root.header)
+    ).map(({ name }) => name);
   } catch {
     return [];
   }

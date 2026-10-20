@@ -334,6 +334,22 @@ export interface ValidationErrors {
     message: string;
     type: { name: string };
   };
+  duplicateNamedSubquery: {
+    message: string;
+    type: { name: string };
+  };
+  namedSubqueryMustBeLowercase: {
+    message: string;
+    type: { name: string };
+  };
+  namedSubqueryForwardReference: {
+    message: string;
+    type: { name: string };
+  };
+  namedSubqueryNotSupportedInCommand: {
+    message: string;
+    type: { command: string };
+  };
   unknownCastingType: {
     message: string;
     type: { castType: string };

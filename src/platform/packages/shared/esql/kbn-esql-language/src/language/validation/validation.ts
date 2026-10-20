@@ -24,6 +24,8 @@ import { getUnmappedFieldsStrategy } from '../../commands/definitions/utils/sett
 import { isTimeseriesSourceCommand } from '../../commands/definitions/utils/timeseries_check';
 import { areNewUnmappedFieldsAllowed } from '../../query_columns_service/helpers';
 import type { ESQLMessage } from '../../commands';
+import { getNamedSubqueries } from '../../commands/definitions/utils/named_subqueries';
+import { validateNamedSubqueries } from '../../commands/registry/let/validate';
 
 const UNRESOLVED_TYPES = new Set(['unknown', 'unsupported', 'param']);
 
@@ -73,27 +75,39 @@ async function validateAst(
 
   const rootCommands = parsingResult.ast.commands;
 
-  const [sources, availablePolicies, joinIndices, timeSeriesSources, views, datasets, license] =
-    await Promise.all([
-      shouldValidateCallback(callbacks, 'getSources')
-        ? retrieveSources(rootCommands, callbacks)
-        : new Set<string>(),
-      shouldValidateCallback(callbacks, 'getPolicies')
-        ? retrievePolicies(rootCommands, callbacks)
-        : new Map(),
-      shouldValidateCallback(callbacks, 'getJoinIndices')
-        ? callbacks?.getJoinIndices?.()
-        : undefined,
-      shouldValidateCallback(callbacks, 'getTimeseriesIndices')
-        ? callbacks?.getTimeseriesIndices?.()
-        : undefined,
-      shouldValidateCallback(callbacks, 'getViews') ? callbacks?.getViews?.() : undefined,
-      shouldValidateCallback(callbacks, 'getDatasets') ? callbacks?.getDatasets?.() : undefined,
-      callbacks?.getLicense?.(),
-    ]);
+  const [
+    indexSources,
+    availablePolicies,
+    joinIndices,
+    timeSeriesSources,
+    views,
+    datasets,
+    license,
+  ] = await Promise.all([
+    shouldValidateCallback(callbacks, 'getSources')
+      ? retrieveSources(rootCommands, callbacks)
+      : new Set<string>(),
+    shouldValidateCallback(callbacks, 'getPolicies')
+      ? retrievePolicies(rootCommands, callbacks)
+      : new Map(),
+    shouldValidateCallback(callbacks, 'getJoinIndices') ? callbacks?.getJoinIndices?.() : undefined,
+    shouldValidateCallback(callbacks, 'getTimeseriesIndices')
+      ? callbacks?.getTimeseriesIndices?.()
+      : undefined,
+    shouldValidateCallback(callbacks, 'getViews') ? callbacks?.getViews?.() : undefined,
+    shouldValidateCallback(callbacks, 'getDatasets') ? callbacks?.getDatasets?.() : undefined,
+    callbacks?.getLicense?.(),
+  ]);
   const hasMinimumLicenseRequired = license
     ? (minimumLicenseRequired: LicenseType) => license.hasAtLeast(minimumLicenseRequired)
     : undefined;
+
+  // LET bindings are valid FROM sources, their scoping is checked by validateNamedSubqueries.
+  const sources = new Set([
+    ...indexSources,
+    ...getNamedSubqueries(headerCommands).map(({ name }) => name),
+  ]);
+  messages.push(...validateNamedSubqueries(parsingResult.ast));
 
   const isRootTimeseries = isTimeseriesSourceCommand(rootCommands);
 
@@ -187,7 +201,12 @@ async function validateAst(
       // Cheap anyway: its source columns were already cached earlier in this loop.
       const rightColumns = await Promise.all(
         inSubqueries.map(({ query }) =>
-          new QueryColumns(query, queryString, callbacks, options).asMap()
+          new QueryColumns(
+            { ...query, header: headerCommands },
+            queryString,
+            callbacks,
+            options
+          ).asMap()
         )
       );
       messages.push(

@@ -108,6 +108,38 @@ function getMessageAndTypeFromId<K extends ErrorTypes>({
           values: { name: out.name },
         }),
       };
+    case 'duplicateNamedSubquery':
+      return {
+        message: i18n.translate('kbn-esql-language.esql.validation.duplicateNamedSubquery', {
+          defaultMessage: 'Duplicate LET binding name [{name}]',
+          values: { name: out.name },
+        }),
+      };
+    case 'namedSubqueryMustBeLowercase':
+      return {
+        message: i18n.translate('kbn-esql-language.esql.validation.namedSubqueryMustBeLowercase', {
+          defaultMessage: 'LET binding name [{name}] must be lowercase',
+          values: { name: out.name },
+        }),
+      };
+    case 'namedSubqueryForwardReference':
+      return {
+        message: i18n.translate('kbn-esql-language.esql.validation.namedSubqueryForwardReference', {
+          defaultMessage:
+            'Forward reference in LET bindings: [{name}] cannot be referenced before its declaration',
+          values: { name: out.name },
+        }),
+      };
+    case 'namedSubqueryNotSupportedInCommand':
+      return {
+        message: i18n.translate(
+          'kbn-esql-language.esql.validation.namedSubqueryNotSupportedInCommand',
+          {
+            defaultMessage: 'Subqueries are not supported in {command}',
+            values: { command: out.command },
+          }
+        ),
+      };
     case 'noMatchingCallSignature':
       const signatureList = (out.validSignatures as unknown as string[])
         .map((sig) => `- (${sig})`)

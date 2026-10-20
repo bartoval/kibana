@@ -141,6 +141,29 @@ describe('getIndexPatternsFromESQLQuery', () => {
     });
   });
 
+  it('should resolve LET bindings to the sources of their subqueries', () => {
+    expect(
+      getIndexPatternsFromESQLQuery('LET top = (FROM index1, remote:index2 | LIMIT 2); FROM top')
+    ).toEqual({
+      indexPattern: 'index1,remote:index2',
+      indexPatternWithoutRemoteClusterPrefix: 'index1,index2',
+    });
+  });
+
+  it('should resolve chained LET bindings and keep plain sources', () => {
+    expect(
+      getIndexPatternsFromESQLQuery(
+        'LET a = (FROM index1); LET b = (FROM a, index2); FROM b, index3, (FROM a | KEEP x)'
+      ).indexPattern
+    ).toBe('index1,index2,index3');
+  });
+
+  it('should not resolve a binding referenced before its declaration', () => {
+    expect(
+      getIndexPatternsFromESQLQuery('LET a = (FROM b); LET b = (FROM index1); FROM a').indexPattern
+    ).toBe('b');
+  });
+
   it('should return empty strings for queries without a source', () => {
     expect(getIndexPatternsFromESQLQuery('')).toEqual({
       indexPattern: '',
@@ -191,6 +214,14 @@ describe('getSourceCommandQueryFromESQLQuery', () => {
         'FROM index1, (FROM index2, (FROM index3 | KEEP b) | DROP c) | LIMIT 5'
       )
     ).toBe('FROM index1, (FROM index2, (FROM index3))');
+  });
+
+  it('reduces LET bindings to the source command of their subqueries', () => {
+    expect(
+      getSourceCommandQueryFromESQLQuery(
+        'LET a = (FROM index1 | KEEP x); LET b = (FROM a, index2 | LIMIT 1); FROM b | STATS count()'
+      )
+    ).toBe('FROM (FROM (FROM index1), index2)');
   });
 
   it('uses the index parameter of a PROMQL query, as the ES|QL editor does', () => {

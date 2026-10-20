@@ -18,6 +18,7 @@ import type {
   UnmappedFieldsStrategy,
 } from './types';
 import type { ESQLMessage } from '../definitions/types';
+import type { NamedSubquery } from '../definitions/utils/named_subqueries';
 
 /**
  * Interface defining the methods that each ES|QL command should register.
@@ -170,6 +171,8 @@ export interface IAdditionalFields {
   fromPromql?: (cmd: ESQLCommand) => Promise<ESQLFieldWithMetadata[]>;
   /** True when the pipeline source command is TS, so STATS output typing can apply implicit aggregates. */
   isTimeseriesSource?: boolean;
+  /** LET bindings that FROM sources of the current pipeline can reference. */
+  namedSubqueries?: readonly NamedSubquery[];
 }
 
 /**

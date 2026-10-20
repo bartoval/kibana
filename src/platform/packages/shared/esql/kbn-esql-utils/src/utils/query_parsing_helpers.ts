@@ -14,18 +14,20 @@ import {
   isColumn,
   WrappingPrettyPrinter,
   BasicPrettyPrinter,
+  isSource,
   isStringLiteral,
 } from '@elastic/esql';
 import {
   CommandNames,
   esqlCommandRegistry,
+  getNamedSubqueries,
   getPromqlBracketsToClose,
+  resolveNamedSubquerySources,
   TRANSFORMATIONAL_COMMANDS,
 } from '@kbn/esql-language';
 import type { PromQLLabel } from '@elastic/esql';
 import type {
   ESQLAstItem,
-  ESQLSource,
   ESQLFunction,
   ESQLColumn,
   ESQLCommand,
@@ -50,7 +52,10 @@ export function getRemoteClustersFromESQLQuery(esql?: string): string[] | undefi
   if (!esql) return undefined;
   const { root } = Parser.parse(esql);
   const sourceCommand = root.commands.find(({ name }) => ['from', 'ts'].includes(name));
-  const args = (sourceCommand?.args ?? []) as ESQLSource[];
+  const args = resolveNamedSubquerySources(
+    (sourceCommand?.args ?? []).filter(isSource),
+    getNamedSubqueries(root.header)
+  );
 
   const clustersSet = new Set<string>();
 

@@ -1257,6 +1257,14 @@ describe('esql query helpers', () => {
       ]);
     });
 
+    it('should extract remote clusters from the sources of LET bindings', () => {
+      expect(
+        getRemoteClustersFromESQLQuery(
+          'LET top = (FROM cluster1:index1 | LIMIT 1); FROM top, local'
+        )
+      ).toEqual(['cluster1']);
+    });
+
     it('should extract multiple remote clusters from mixed indices', () => {
       expect(
         getRemoteClustersFromESQLQuery(

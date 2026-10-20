@@ -23,6 +23,20 @@ describe('set instructions helpers', () => {
         const result = getProjectRoutingFromEsqlQuery(queryString);
         expect(result).toBeUndefined();
       });
+
+      it('should ignore a LET binding named project_routing', () => {
+        const queryString = 'LET project_routing = (FROM my_index); FROM project_routing';
+        const result = getProjectRoutingFromEsqlQuery(queryString);
+        expect(result).toBeUndefined();
+      });
+    });
+
+    describe('when project_routing is set along LET bindings', () => {
+      it('should return the project routing of the SET instruction', () => {
+        const queryString = 'SET project_routing = "_alias:*"; LET x = (FROM my_index); FROM x';
+        const result = getProjectRoutingFromEsqlQuery(queryString);
+        expect(result).toBe('_alias:*');
+      });
     });
 
     describe('when project_routing is set', () => {

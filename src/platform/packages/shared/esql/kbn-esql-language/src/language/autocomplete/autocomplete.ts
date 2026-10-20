@@ -6,7 +6,12 @@
  * your election, the "Elastic License 2.0", the "GNU Affero General Public
  * License v3.0 only", or the "Server Side Public License, v 1".
  */
-import { ControlTriggerSource, ESQLVariableType, type ESQLCallbacks } from '@kbn/esql-types';
+import {
+  ControlTriggerSource,
+  ESQLVariableType,
+  SOURCES_TYPES,
+  type ESQLCallbacks,
+} from '@kbn/esql-types';
 import type { LicenseType } from '@kbn/licensing-types';
 import { EsqlQuery, isHeaderCommand, Walker } from '@elastic/esql';
 import type { ESQLColumn, ESQLCommandOption, ESQLAstAllCommands } from '@elastic/esql/types';
@@ -31,6 +36,10 @@ import { getColumnsByTypeRetriever } from '../shared/columns_retrieval_helpers';
 import { getUnmappedFieldsStrategy } from '../../commands/definitions/utils/settings';
 import { isTimeseriesSourceCommand } from '../../commands/definitions/utils/timeseries_check';
 import { attachReplacementRanges, ReplacementRangeStrategyKind } from './utils/prefix_range';
+import {
+  getNamedSubqueries,
+  isLetHeaderCommand,
+} from '../../commands/definitions/utils/named_subqueries';
 
 function isSourceCommandSuggestion({ label }: { label: string }) {
   const sourceCommands = esqlCommandRegistry
@@ -40,7 +49,7 @@ function isSourceCommandSuggestion({ label }: { label: string }) {
   return sourceCommands.includes(label);
 }
 function isHeaderCommandSuggestion({ label }: { label: string }) {
-  return label === 'SET';
+  return esqlCommandRegistry.getCommandByName(label.toLowerCase())?.metadata.type === 'header';
 }
 
 const orderingEngine = new SuggestionOrderingEngine();
@@ -58,7 +67,13 @@ export async function suggest(
 
   // Use the appropriate AST context for field retrieval
   // When in a subquery, use the subquery's AST to get only its fields
-  const astForFields = astContext.astForContext;
+  // plus the LET bindings declared before the cursor, which the subquery can reference.
+  const namedSubqueriesBeforeCursor = (root.header ?? []).filter(
+    (command) => isLetHeaderCommand(command) && !command.incomplete && command.location.max < offset
+  );
+  const astForFields = astContext.isCursorInSubquery
+    ? { ...astContext.astForContext, header: namedSubqueriesBeforeCursor }
+    : astContext.astForContext;
 
   const { getColumnsByType, getColumnMap } = getColumnsByTypeRetriever(
     getQueryForFields(innerText, astForFields),
@@ -168,7 +183,13 @@ export async function suggest(
         ...recommendedQueriesSuggestionsFromStaticTemplates
       );
 
-      const headerCommandsSuggestions = suggestions.filter(isHeaderCommandSuggestion);
+      // The grammar only accepts SET instructions before the LET ones.
+      const hasLetInstructions = (root.header ?? []).some(isLetHeaderCommand);
+      const headerCommandsSuggestions = suggestions.filter(
+        (suggestion) =>
+          isHeaderCommandSuggestion(suggestion) &&
+          !(hasLetInstructions && suggestion.label === 'SET')
+      );
       const rootLevelSuggestions: ISuggestionItem[] = [
         ...suggestions.filter(isSourceCommandSuggestion),
         ...recommendedQueriesSuggestions,
@@ -301,6 +322,18 @@ async function getSuggestionsWithinCommandExpression(
     innerText,
     callbacks
   );
+
+  // LET bindings declared before the cursor can be referenced as FROM sources.
+  if (astContext.command.name === 'from') {
+    const namedSubquerySources = getNamedSubqueries(headers)
+      .filter(({ command }) => !command.incomplete && command.location.max < innerText.length)
+      .map(({ name }) => ({ name, hidden: false, type: SOURCES_TYPES.NAMED_SUBQUERY }));
+
+    additionalCommandContext.sources = [
+      ...namedSubquerySources,
+      ...(additionalCommandContext.sources ?? []),
+    ];
+  }
 
   const isInsideSubquery = astContext.isCursorInSubquery; // We only show resource browser suggestions in the main query
   const canSuggestResourceBrowser = (await callbacks?.canSuggestResourceBrowser?.()) ?? false;

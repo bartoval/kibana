@@ -50,4 +50,5 @@ export enum SOURCES_TYPES {
   QUERY_STREAM = 'Query Stream',
   EXTERNAL = 'External data',
   VIEW = 'View',
+  NAMED_SUBQUERY = 'Named subquery',
 }

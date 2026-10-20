@@ -6,8 +6,15 @@
  * your election, the "Elastic License 2.0", the "GNU Affero General Public
  * License v3.0 only", or the "Server Side Public License, v 1".
  */
-import { BasicPrettyPrinter, Parser, isSource, isSubQuery, synth } from '@elastic/esql';
-import { esqlCommandRegistry, getIndexFromPromQLParams } from '@kbn/esql-language';
+import { BasicPrettyPrinter, Builder, Parser, isSource, isSubQuery, synth } from '@elastic/esql';
+import {
+  esqlCommandRegistry,
+  findNamedSubqueryForSource,
+  getIndexFromPromQLParams,
+  getNamedSubqueries,
+  getNamedSubqueriesBefore,
+  type NamedSubquery,
+} from '@kbn/esql-language';
 import type { ESQLSource, ESQLCommand, ESQLAstPromqlCommand } from '@elastic/esql/types';
 
 const INDEX_SOURCE_COMMANDS = new Set(['FROM', 'TS']);
@@ -31,30 +38,50 @@ function getPromQLSources(commands: ESQLCommand[]): string[] {
   return index ? [index] : [];
 }
 
-function getDirectIndexSources(commands: ESQLCommand[]): ESQLSource[] {
-  const sourceCommand = commands.find(({ name }) => INDEX_SOURCE_COMMANDS.has(name.toUpperCase()));
-  if (!sourceCommand) {
-    return [];
+// A source referencing a LET binding is replaced by the sources of the binding subquery.
+function resolveSource(
+  source: ESQLSource,
+  namedSubqueries: readonly NamedSubquery[]
+): ESQLSource[] {
+  const namedSubquery = findNamedSubqueryForSource(source, namedSubqueries);
+  if (!namedSubquery) {
+    return [source];
   }
 
-  return (sourceCommand.args as ESQLSource[]).filter(
-    (arg): arg is ESQLSource => arg.sourceType === 'index'
+  return getIndexSources(
+    namedSubquery.query.commands,
+    getNamedSubqueriesBefore(namedSubqueries, namedSubquery.command)
   );
 }
 
-function getIndexSources(commands: ESQLCommand[]): ESQLSource[] {
+function getDirectIndexSources(
+  commands: ESQLCommand[],
+  namedSubqueries: readonly NamedSubquery[]
+): ESQLSource[] {
   const sourceCommand = commands.find(({ name }) => INDEX_SOURCE_COMMANDS.has(name.toUpperCase()));
   if (!sourceCommand) {
     return [];
   }
 
-  const directSources = (sourceCommand.args as ESQLSource[]).filter(
-    (arg): arg is ESQLSource => arg.sourceType === 'index'
-  );
+  return (sourceCommand.args as ESQLSource[])
+    .filter((arg): arg is ESQLSource => arg.sourceType === 'index')
+    .flatMap((source) => resolveSource(source, namedSubqueries));
+}
+
+function getIndexSources(
+  commands: ESQLCommand[],
+  namedSubqueries: readonly NamedSubquery[] = []
+): ESQLSource[] {
+  const sourceCommand = commands.find(({ name }) => INDEX_SOURCE_COMMANDS.has(name.toUpperCase()));
+  if (!sourceCommand) {
+    return [];
+  }
+
+  const directSources = getDirectIndexSources([sourceCommand], namedSubqueries);
 
   const subquerySources = sourceCommand.args
     .filter(isSubQuery)
-    .flatMap((subquery) => getDirectIndexSources(subquery.child.commands));
+    .flatMap((subquery) => getDirectIndexSources(subquery.child.commands, namedSubqueries));
 
   return [...directSources, ...subquerySources];
 }
@@ -75,7 +102,7 @@ export function getIndexPatternsFromESQLQuery(esql?: string): ESQLIndexPatterns 
   }
 
   const { root } = Parser.parse(esql);
-  const indexSources = getIndexSources(root.commands);
+  const indexSources = getIndexSources(root.commands, getNamedSubqueries(root.header));
   const promqlSources = getPromQLSources(root.commands);
 
   const indexPattern = [...indexSources.map((source) => source.name), ...promqlSources];
@@ -125,10 +152,27 @@ export function getSourceCommandFromESQLQuery(
 }
 
 // A DSL filter applies to every source's documents before a subquery's own commands,
-// so a subquery contributes the fields of its source command.
-const reduceSubqueriesToSource = (command: ESQLCommand): ESQLCommand => ({
+// so a subquery contributes the fields of its source command. A source referencing
+// a LET binding is a subquery as well.
+const reduceSubqueriesToSource = (
+  command: ESQLCommand,
+  namedSubqueries: readonly NamedSubquery[] = []
+): ESQLCommand => ({
   ...command,
   args: command.args.map((arg) => {
+    const namedSubquery = isSource(arg)
+      ? findNamedSubqueryForSource(arg, namedSubqueries)
+      : undefined;
+    if (namedSubquery) {
+      const [bindingSource] = namedSubquery.query.commands;
+      const visible = getNamedSubqueriesBefore(namedSubqueries, namedSubquery.command);
+      return Builder.expression.parens(
+        Builder.expression.query(
+          bindingSource ? [reduceSubqueriesToSource(bindingSource, visible)] : []
+        )
+      );
+    }
+
     if (!isSubQuery(arg)) {
       return arg;
     }
@@ -137,7 +181,7 @@ const reduceSubqueriesToSource = (command: ESQLCommand): ESQLCommand => ({
       ...arg,
       child: {
         ...arg.child,
-        commands: subquerySource ? [reduceSubqueriesToSource(subquerySource)] : [],
+        commands: subquerySource ? [reduceSubqueriesToSource(subquerySource, namedSubqueries)] : [],
       },
     };
   }),
@@ -162,7 +206,11 @@ export function getSourceCommandQueryFromESQLQuery(esql: string | undefined): st
   if (sourceCommand) {
     // Nothing to describe yet, e.g. `FROM ` while typing.
     const hasSources = sourceCommand.args.some((arg) => isSource(arg) || isSubQuery(arg));
-    return hasSources ? BasicPrettyPrinter.command(reduceSubqueriesToSource(sourceCommand)) : '';
+    return hasSources
+      ? BasicPrettyPrinter.command(
+          reduceSubqueriesToSource(sourceCommand, getNamedSubqueries(root.header))
+        )
+      : '';
   }
 
   const [promqlIndex] = getPromQLSources(root.commands);

@@ -34,6 +34,8 @@ export function getProjectRoutingFromEsqlQuery(queryString: string): string | un
     const headerInstructions = parsedQuery.ast.header ?? [];
 
     for (const instruction of headerInstructions) {
+      if (instruction.name !== 'set') continue;
+
       const instructionFunction = instruction.args.find(isFunctionExpression);
       if (!instructionFunction) continue;
 

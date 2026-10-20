@@ -18,6 +18,7 @@ import type {
 } from '@elastic/esql/types';
 import { inOperators } from '../../commands/definitions/all_operators';
 import { expandEvals } from '../shared/expand_evals';
+import { getNamedSubqueries } from '../../commands/definitions/utils/named_subqueries';
 
 const COMMANDS_WITH_SUBQUERIES = new Set(['from', 'where', 'eval', 'stats', 'inline stats']);
 
@@ -27,15 +28,28 @@ export interface InSubqueryReference {
 }
 
 /**
- * Returns a list of subqueries to validate
+ * Returns a list of subqueries to validate, including the ones of the LET bindings
  * @param rootCommands
  */
 export function getSubqueriesToValidate(
   rootCommands: ESQLCommand[],
   headerCommands: ESQLAstHeaderCommand[]
 ) {
+  const subsequences = [
+    ...getNamedSubqueries(headerCommands).flatMap(({ query }) =>
+      getPipelineSubsequences(query.commands)
+    ),
+    ...getPipelineSubsequences(rootCommands),
+  ];
+
+  return subsequences.map((subsequence) =>
+    Builder.expression.query(subsequence, undefined, headerCommands)
+  );
+}
+
+function getPipelineSubsequences(commands: ESQLCommand[]): ESQLCommand[][] {
   const subsequences = [];
-  const expandedCommands = expandEvals(rootCommands);
+  const expandedCommands = expandEvals(commands);
   for (let i = 0; i < expandedCommands.length; i++) {
     const command = expandedCommands[i];
 
@@ -56,9 +70,7 @@ export function getSubqueriesToValidate(
     subsequences.push(expandedCommands.slice(0, i + 1));
   }
 
-  return subsequences.map((subsequence) =>
-    Builder.expression.query(subsequence, undefined, headerCommands)
-  );
+  return subsequences;
 }
 
 /**
