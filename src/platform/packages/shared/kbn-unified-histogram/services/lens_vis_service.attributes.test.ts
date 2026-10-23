@@ -9,7 +9,8 @@
 
 import { EsqlSource, registerEsqlSourceInDataViewsCache } from '@kbn/data-source';
 import { cloneDeep } from 'lodash';
-import { getRepresentativeQuery } from '@kbn/lens-common';
+import { getRepresentativeQuery, withLegacyAggregateQuerySlot } from '@kbn/lens-common';
+import type { XYVisualizationState } from '@kbn/lens-common';
 import {
   isLensLegacyAttributes,
   LensConfigBuilder,
@@ -25,6 +26,7 @@ import {
 import { buildDataViewMock } from '../__mocks__/data_view';
 import { currentSuggestionMock, allSuggestionsMock } from '../__mocks__/suggestions';
 import { getDefaultDataSource, getLensVisMock } from '../__mocks__/lens_vis';
+import type { UnifiedHistogramVisContext } from '../types';
 import { UnifiedHistogramExternalVisContextStatus, UnifiedHistogramSuggestionType } from '../types';
 
 describe('LensVisService attributes', () => {
@@ -58,6 +60,18 @@ describe('LensVisService attributes', () => {
   const query: Query | AggregateQuery = { language: 'kuery', query: 'extension : css' };
   const queryEsql: Query | AggregateQuery = { esql: 'from logstash-* | limit 10' };
   const timeInterval = 'auto';
+
+  const withEsqlLayerTimeField = (
+    visContext: UnifiedHistogramVisContext,
+    timeField: string | undefined
+  ): UnifiedHistogramVisContext => {
+    const expected = cloneDeep(visContext);
+    const layers = expected.attributes.state.datasourceStates.textBased?.layers ?? {};
+    for (const layer of Object.values(layers)) {
+      layer.timeField = timeField;
+    }
+    return expected;
+  };
 
   it('should return correct attributes', async () => {
     const breakdownField: DataViewField | undefined = undefined;
@@ -879,7 +893,7 @@ describe('LensVisService attributes', () => {
       }
       const savedVisContext = cloneDeep(visContext);
       if (queryFormat === 'legacy dual-written query') {
-        savedVisContext.attributes.state.query = getRepresentativeQuery(visContext.attributes);
+        savedVisContext.attributes = withLegacyAggregateQuerySlot(savedVisContext.attributes);
       }
       const onVisContextChanged = jest.fn();
       lensService.update({
@@ -1202,7 +1216,7 @@ describe('LensVisService attributes', () => {
       );
       const restored = lensService.state$.getValue().visContext;
       if (shouldApply) {
-        expect(restored).toStrictEqual(savedVisContext);
+        expect(restored).toStrictEqual(withEsqlLayerTimeField(savedVisContext, currentTimeField));
       } else {
         expect(
           Object.values(restored?.attributes.state.datasourceStates.textBased?.layers ?? {}).map(
@@ -1236,12 +1250,10 @@ describe('LensVisService attributes', () => {
     if (savedAttributes.visualizationType !== 'lnsXY') {
       throw new Error('Expected an XY histogram');
     }
-    savedAttributes.state.visualization.preferredSeriesType = 'line';
-    savedAttributes.state.visualization.layers = savedAttributes.state.visualization.layers.map(
-      (layer) =>
-        layer.layerType === 'data'
-          ? { ...layer, seriesType: 'line', xAccessor: 'timestamp' }
-          : layer
+    const visualization = savedAttributes.state.visualization as XYVisualizationState;
+    visualization.preferredSeriesType = 'line';
+    visualization.layers = visualization.layers.map((layer) =>
+      layer.layerType === 'data' ? { ...layer, seriesType: 'line', xAccessor: 'timestamp' } : layer
     );
     const builder = new LensConfigBuilder(undefined, true);
     const apiConfig = builder.toAPIFormat(savedAttributes);
@@ -1283,7 +1295,7 @@ describe('LensVisService attributes', () => {
       onVisContextChanged,
     });
     expect(onVisContextChanged).toHaveBeenCalledWith(
-      restoredVisContext,
+      withEsqlLayerTimeField(restoredVisContext, dataViewWithAtTimefieldMock.timeFieldName),
       UnifiedHistogramExternalVisContextStatus.applied
     );
   });
@@ -1380,7 +1392,7 @@ describe('LensVisService attributes', () => {
         onVisContextChanged,
       });
       expect(onVisContextChanged).toHaveBeenCalledWith(
-        externalVisContext,
+        withEsqlLayerTimeField(externalVisContext, dataViewWithAtTimefieldMock.timeFieldName),
         UnifiedHistogramExternalVisContextStatus.applied
       );
     }
