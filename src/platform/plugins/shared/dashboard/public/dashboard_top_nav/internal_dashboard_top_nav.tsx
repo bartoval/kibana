@@ -8,7 +8,7 @@
  */
 
 import deepEqual from 'fast-deep-equal';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import UseUnmount from 'react-use/lib/useUnmount';
 
 import type { EuiBreadcrumb, UseEuiTheme } from '@elastic/eui';
@@ -41,6 +41,7 @@ import type {
 import { useFavorite } from '@kbn/content-management-favorites-public';
 import { AppMenuComponent, type AppMenuConfig } from '@kbn/core-chrome-app-menu-components';
 import { DASHBOARD_APP_ID, LANDING_PAGE_PATH } from '../../common/page_bundle_constants';
+import { forgetDashboardSearchSession } from '../dashboard_api/search_sessions/replay_search_session';
 import { useDashboardApi } from '../dashboard_api/use_dashboard_api';
 import { useDashboardInternalApi } from '../dashboard_api/use_dashboard_internal_api';
 import {
@@ -197,6 +198,11 @@ export function InternalDashboardTopNav({
     dashboardApi.dataLoading$,
     dashboardApi.canCancel$
   );
+
+  const onCancel = useCallback(() => {
+    dashboardApi.cancelAllRequests();
+    forgetDashboardSearchSession(lastSavedId);
+  }, [dashboardApi, lastSavedId]);
 
   const hasUnpublishedFilters = useMemo(() => {
     return !deepEqual(publishedChildFilters ?? [], unpublishedChildFilters ?? []);
@@ -542,7 +548,7 @@ export function InternalDashboardTopNav({
             hasUnpublishedFilters || hasUnpublishedTimeslice || hasUnpublishedVariables
           }
           isLoading={dataLoading ?? false}
-          onCancel={canCancel ? dashboardApi.cancelAllRequests : undefined}
+          onCancel={canCancel ? onCancel : undefined}
           useBackgroundSearchButton={
             dataService.search.isBackgroundSearchEnabled &&
             getDashboardCapabilities().storeSearchSession
